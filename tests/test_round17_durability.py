@@ -22,6 +22,8 @@ from core.workspace import atomic_write
 class Round17DurabilityCase(unittest.TestCase):
 
     def test_directory_fsync_degrades_only_for_explicitly_unsupported_errors(self) -> None:
+        if os.name == "nt":
+            self.skipTest("directory handles do not support POSIX fsync semantics on Windows")
         with mock.patch("core.durability.os.open", side_effect=OSError(errno.EINVAL, "unsupported")):
             self.assertFalse(durability.fsync_directory(Path("/does-not-matter")))
         with mock.patch("core.durability.os.open", side_effect=OSError(errno.EIO, "io failure")):
@@ -155,7 +157,7 @@ class Round17DurabilityCase(unittest.TestCase):
                 with tempfile.TemporaryDirectory() as directory:
                     root = Path(directory)
                     (root / ".upgrade").mkdir()
-                    target = root / f"odd [artifact] {index} !?.bin"
+                    target = root / f"odd [artifact] {index} !.bin"
                     before = b"before:" + rng.randbytes(32)
                     after = b"after:" + rng.randbytes(47)
                     third_party = b"third-party:" + rng.randbytes(29)

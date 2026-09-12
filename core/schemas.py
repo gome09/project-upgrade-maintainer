@@ -116,7 +116,7 @@ def normalize_registered_artifact_path(value: str) -> str:
     value = normalize_user_path(value)
     if not value:
         raise CliError("artifact policy path must not be empty")
-    if Path(value).is_absolute():
+    if value.startswith(("/", "\\")) or Path(value).is_absolute():
         raise CliError("artifact policy path must be repository-relative")
     if not value.startswith(".upgrade/"):
         value = f".upgrade/{value}"

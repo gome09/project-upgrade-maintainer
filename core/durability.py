@@ -101,7 +101,7 @@ def durable_copy_file(source: Path, target: Path) -> None:
     os.close(fd)
     try:
         shutil.copy2(source, temp_name)
-        with open(temp_name, "rb") as stream:
+        with open(temp_name, "r+b") as stream:
             os.fsync(stream.fileno())
         os.replace(temp_name, target)
         fsync_directory(target.parent)
