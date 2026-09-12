@@ -1,0 +1,16 @@
+{
+  "active_modules": [
+    "core",
+    "planning"
+  ],
+  "artifact_registry_sha256": "9436a6a9ddd13ca0a2ae7a47bf4748145518fb7d2177593f2cda514526a65c61",
+  "bootstrap_recommendation": null,
+  "created_at": "2026-09-10T08:50:11+00:00",
+  "initial_profile": "lean",
+  "last_synced_policy_version": 6,
+  "last_synced_skill_version": "10.0.0",
+  "managed_by": "project-upgrade-maintainer",
+  "schema_version": 1,
+  "selection_source": "explicit",
+  "updated_at": "2026-09-10T08:50:11+00:00"
+}

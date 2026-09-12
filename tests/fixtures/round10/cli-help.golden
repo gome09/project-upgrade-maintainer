@@ -1,0 +1,30 @@
+usage: upgrade_workspace.py [-h] [--root ROOT] [--format {json,markdown}]
+                            [--view {full,agent}] [--output OUTPUT]
+                            {version,inspect,bootstrap-review,initialize,sync,authority-review,authority-apply,authority-audit,artifact-policy-review,artifact-policy-apply,collect-review,collect-apply,phase-update,cleanup-review,cleanup-apply,artifact-audit,git-audit,git-policy-review,git-policy-apply,validation-record,purge-review,purge-apply,decision-review,decision-apply,decision-audit,risk-review,risk-apply,risk-audit,recovery-audit,recovery-review,recovery-apply,exception-review,exception-apply,exception-audit,delivery-policy-review,delivery-policy-apply,delivery-policy-audit,delivery-review,delivery-apply,delivery-audit,health-check} ...
+
+Deterministic maintenance CLI for the project-upgrade-maintainer skill.
+
+positional arguments:
+  {version,inspect,bootstrap-review,initialize,sync,authority-review,authority-apply,authority-audit,artifact-policy-review,artifact-policy-apply,collect-review,collect-apply,phase-update,cleanup-review,cleanup-apply,artifact-audit,git-audit,git-policy-review,git-policy-apply,validation-record,purge-review,purge-apply,decision-review,decision-apply,decision-audit,risk-review,risk-apply,risk-audit,recovery-audit,recovery-review,recovery-apply,exception-review,exception-apply,exception-audit,delivery-policy-review,delivery-policy-apply,delivery-policy-audit,delivery-review,delivery-apply,delivery-audit,health-check}
+    version             report skill, policy, and plan schema versions without
+                        mutation
+    inspect             read a saved review plan with bounded progressive
+                        disclosure
+    bootstrap-review    read-only repository profiling and adaptive
+                        initialization recommendation
+    authority-review    discover project authority candidates and review
+                        explicit register/rebind/unregister decisions
+    authority-audit     audit registered authority sources and list
+                        unregistered candidates
+    artifact-policy-review
+                        classify and review linkage policy for an extension
+                        artifact under .upgrade
+
+options:
+  -h, --help            show this help message and exit
+  --root ROOT           repository root
+  --format {json,markdown}
+  --view {full,agent}   output projection: full evidence or token-efficient
+                        agent decision surface
+  --output OUTPUT       write rendered output to a new repository-local path;
+                        relative paths use --root

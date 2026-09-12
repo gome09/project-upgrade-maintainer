@@ -1,0 +1,56 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run unit and integration tests
+        run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Build release archive smoke test
+        if: matrix.python-version == '3.12'
+        run: python tools/build_skill.py --output dist/project-upgrade-maintainer.skill
+
+  e2e:
+    name: E2E acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run acceptance flow
+        run: python tests/e2e_acceptance.py
+  package:
+    name: Build release archive
+    runs-on: ubuntu-latest
+    needs: [unit, e2e]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build .skill archive
+        run: python tools/build_skill.py --output dist/project-upgrade-maintainer.skill
+      - name: Upload release archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: project-upgrade-maintainer-skill
+          path: dist/project-upgrade-maintainer.skill

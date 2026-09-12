@@ -1,0 +1,9 @@
+# project-upgrade-maintainer:start
+# Exclude upgrade workflow workspace from Docker build context by default
+.upgrade/tmp
+.upgrade/logs
+.upgrade/archive
+.upgrade/checkpoints
+.upgrade/prompts
+.upgrade/traces
+# project-upgrade-maintainer:end

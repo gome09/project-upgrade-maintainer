@@ -1,0 +1,6 @@
+interface:
+  display_name: "Project Upgrade Maintainer"
+  short_description: "Govern adaptive project upgrades with authority mapping, deterministic review/apply, delivery evidence, and CI health"
+  default_prompt: "Use $project-upgrade-maintainer to profile this project and safely govern its upgrade workspace, project authority network, artifacts, delivery evidence, and CI health."
+policy:
+  allow_implicit_invocation: false

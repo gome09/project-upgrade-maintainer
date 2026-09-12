@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible non-security defect
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report vulnerabilities, credentials, private repository content, or destructive exploit details here. Follow SECURITY.md for security issues.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: "18.0.0"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python / OS
+      placeholder: "Python 3.12 on Ubuntu 24.04"
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command
+      placeholder: "cleanup-review"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Use synthetic data only. Remove local paths, credentials, tokens, and proprietary content.
+    validations:
+      required: true

@@ -1,0 +1,13 @@
+# project-upgrade-maintainer:start
+# Upgrade workflow temporary and generated artifacts
+.upgrade/tmp/*
+!.upgrade/tmp/.gitkeep
+.upgrade/logs/*
+!.upgrade/logs/.gitkeep
+.upgrade/archive/*
+!.upgrade/archive/.gitkeep
+.upgrade/checkpoints/*.tmp
+.upgrade/checkpoints/*.bak
+.upgrade/reports/*.tmp
+.upgrade/reports/*.bak
+# project-upgrade-maintainer:end

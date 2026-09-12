@@ -1,0 +1,40 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Coverage / test output
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+test-results/
+
+# Build / package output
+build/
+dist/
+*.egg-info/
+*.skill
+
+
+# Local Codex/tool scratch output
+.codex-tmp/
+# Local workspace state created while exercising this Skill on itself
+.upgrade/
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
