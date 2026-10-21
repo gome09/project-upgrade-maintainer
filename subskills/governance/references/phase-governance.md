@@ -20,3 +20,11 @@ When an active phase is explicitly completed, its stage artifact is updated to `
 Every actual phase change writes an append-only transition checkpoint containing the source phase, destination phase, transition kind, reason, and timestamp. `health-check` compares `STATE.md` with the most recent checkpoint by write time, which allows an explicitly recorded regression without treating the highest historical phase number as current.
 
 Use `phase-update --plan-drift` to record meaningful deviations from the approved plan in `STATE.md`; acceptance remains an explicit user decision.
+
+Omitted optional fields retain their existing values in STATE and the phase artifact. Refreshing a phase does not reset its next action.
+
+## Opt-in Phase Exit Gate
+
+The approved Delivery Policy may configure repeated `--phase-check PHASE=CHECK` entries. Before advancing or skipping away from a configured active phase, `phase-update` checks those validations against `--subject-path` (or Git/external subject), `--scope`, and `--environment`. Policy age and local-execution requirements also apply. It reuses final-acceptance governance checks, so open selected/global risks, unresolved recovery, STATE blockers/unverified items/plan drift, expired exceptions, or unsealed earlier-schema governance can prevent exit. Failure occurs before phase writes; success stores policy identity and bound evidence digest in the completed phase artifact.
+
+Only the phase being exited is checked; skipped phases are not claimed as completed. Refresh/regression and projects with no configured phase checks retain existing behavior. Explicit completion and skip permissions remain necessary. No automatic waiver bypass is provided: resolve blockers or review and explicitly approve a replacement policy. Read the Delivery Policy reference when configuring the controls; ordinary phase updates need not repeat policy review or delivery review.

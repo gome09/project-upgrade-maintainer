@@ -43,17 +43,19 @@ def artifact_audit(root: Path, args: argparse.Namespace, result: Result) -> None
 
 def git_audit(root: Path, args: argparse.Namespace, result: Result) -> None:
     entries, snapshot = audit_entries(root, args.focus)
+    if getattr(args, "include_artifacts", False):
+        result.result["artifact_entries"] = entries
     if not snapshot["available"]:
         result.status = "warning"
         result.warnings.append("repository is not a readable Git work tree")
-        result.result = {"entries": [], "summary": {}, "repo_root": snapshot["repo_root"]}
+        result.result.update({"entries": [], "summary": {}, "repo_root": snapshot["repo_root"]})
         return
     findings = [entry for entry in entries if entry["git_mismatch"] or entry["classification"] == "sensitive"]
     summary: dict[str, int] = {}
     for entry in findings:
         key = f"{entry['classification']}:{entry['actual_git_state']}"
         summary[key] = summary.get(key, 0) + 1
-    result.result = {"entries": findings, "summary": dict(sorted(summary.items())), "repo_root": snapshot["repo_root"]}
+    result.result.update({"entries": findings, "summary": dict(sorted(summary.items())), "repo_root": snapshot["repo_root"]})
     if Path(snapshot["repo_root"]).resolve() != root.resolve():
         result.warnings.append(f"--root differs from Git repository root: {snapshot['repo_root']}")
     if findings:

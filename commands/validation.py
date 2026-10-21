@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
+import subprocess
+import tempfile
 from pathlib import Path
 
 from core.audit import Result
@@ -35,6 +38,57 @@ def validation_record(root: Path, args: argparse.Namespace, result: Result) -> N
     validate_validation_history(existing_raw)
     previous_digest = governance_record_digest(existing_raw[-1]) if existing_raw else None
 
+    execute = getattr(args, "execute", None)
+    execution = None
+    if execute is not None:
+        if not execute or args.status is not None or args.exit_code is not None:
+            raise CliError("--execute requires argv and cannot be combined with --status/--exit-code")
+        if args.dry_run:
+            raise CliError("--execute cannot be used with --dry-run")
+        if args.timeout_seconds <= 0:
+            raise CliError("timeout-seconds must be positive")
+        request_id = getattr(args, "request_id", None)
+        for existing in existing_raw:
+            if request_id is None or existing.get("request_id") != request_id:
+                continue
+            expected = {"check": args.check, "scope": args.scope or "", "environment": args.environment or "",
+                        "note": args.note or "", "subject_type": subject["type"], "subject_ref": subject["ref"],
+                        "subject_digest": subject["digest"]}
+            if any(existing.get(key) != value for key, value in expected.items()) or existing.get("execution", {}).get("argv") != execute:
+                raise CliError("validation request_id already exists with different evidence")
+            result.result = {"record": existing, "subject": subject, "replayed": True}
+            return
+        started_at = now_iso()
+        timed_out = False
+        # Spool output to private files instead of retaining unbounded output
+        # or persisting potentially sensitive command output in the workspace.
+        with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+            try:
+                completed = subprocess.run(execute, cwd=root, stdin=subprocess.DEVNULL,
+                                           stdout=stdout, stderr=stderr, timeout=args.timeout_seconds,
+                                           shell=False, check=False)
+                exit_code = completed.returncode
+            except subprocess.TimeoutExpired:
+                timed_out, exit_code = True, None
+            except OSError as exc:
+                raise CliError(f"cannot execute validation command: {exc}") from exc
+            def output_digest(stream):
+                stream.seek(0)
+                digest = hashlib.sha256()
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                return digest.hexdigest()
+            execution = {"argv": execute, "started_at": started_at, "finished_at": now_iso(),
+                         "stdout_sha256": output_digest(stdout), "stderr_sha256": output_digest(stderr),
+                         "timed_out": timed_out,
+                         "subject_unchanged": resolve_subject(root, subject_path=args.subject_path,
+                            subject_digest=args.subject_digest, subject_ref=args.subject_ref,
+                            fallback_ref="workspace") == subject}
+        args.exit_code = exit_code
+        args.status = "passed" if exit_code == 0 and not timed_out and execution["subject_unchanged"] else "failed"
+    elif args.status is None:
+        raise CliError("validation requires --status for manual evidence or --execute for local execution")
+
     record = {
         "schema_version": VALIDATION_SCHEMA_VERSION,
         "timestamp": now_iso(),
@@ -49,6 +103,19 @@ def validation_record(root: Path, args: argparse.Namespace, result: Result) -> N
         "subject_digest": subject["digest"],
         "previous_record_digest": previous_digest,
     }
+    if execution is not None:
+        record["execution"] = execution
+    request_id = getattr(args, "request_id", None)
+    if request_id is not None:
+        record["request_id"] = request_id
+        for existing in existing_raw:
+            if existing.get("request_id") != request_id:
+                continue
+            semantic_fields = (set(record) | set(existing)) - {"timestamp", "previous_record_digest", "record_digest"}
+            if any(existing.get(key) != record.get(key) for key in semantic_fields):
+                raise CliError("validation request_id already exists with different evidence")
+            result.result = {"record": existing, "subject": subject, "replayed": True}
+            return
     record["record_digest"] = governance_record_digest(record)
     record = validate_validation_record(record)
     validate_validation_history([*existing_raw, record])

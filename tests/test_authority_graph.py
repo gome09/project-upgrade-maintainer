@@ -39,7 +39,7 @@ class AuthorityGraphCase(unittest.TestCase):
 
     def test_version_and_initialize_create_authority_control_plane(self) -> None:
         version = self.cli("version")["result"]
-        self.assertEqual("18.0.0", version["skill_version"])
+        self.assertEqual("18.0.1", version["skill_version"])
         self.assertEqual(14, version["policy_version"])
         self.assertEqual(2, version["workspace_config_schema_version"])
         self.assertEqual([1], version["previous_workspace_config_schema_versions"])
@@ -207,7 +207,7 @@ class AuthorityGraphCase(unittest.TestCase):
         migrated = json.loads(config_path.read_text(encoding="utf-8"))
         registry = json.loads((upgrade / "AUTHORITY.json").read_text(encoding="utf-8"))
         self.assertEqual(2, migrated["schema_version"])
-        self.assertEqual("18.0.0", migrated["last_synced_skill_version"])
+        self.assertEqual("18.0.1", migrated["last_synced_skill_version"])
         self.assertEqual(14, migrated["last_synced_policy_version"])
         self.assertEqual([], registry["entries"])
         self.assertEqual(state_before, (upgrade / "STATE.md").read_bytes())

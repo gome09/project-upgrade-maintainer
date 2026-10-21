@@ -24,13 +24,6 @@ def _raw_json(path:Path,payload:dict[str,Any])->None:
     data=(json.dumps(payload,ensure_ascii=False,indent=2,sort_keys=True)+'\n').encode()
     atomic_write_bytes(path,data)
 
-def _alive(pid:int)->bool:
-    if pid<=0:return False
-    try:os.kill(pid,0);return True
-    except ProcessLookupError:return False
-    except PermissionError:return True
-    except OSError:return False
-
 def _descriptor(path:Path)->dict[str,Any]:
     if not path.exists():return {'exists':False}
     if path.is_symlink() or not path.is_file():raise CliError(f'transaction target must be a regular file or absent: {path}')
@@ -114,12 +107,16 @@ class Transaction:
     @classmethod
     def start(cls,root:Path,command:str,transaction_id:str|None=None)->'Transaction':
         tx=cls(root,command,transaction_id);tx._start();return tx
-    def _start(self):
+    def _start(self, *, deferred: bool = False):
         existing=unresolved_transactions(self.root)
         if existing:raise CliError(f"unresolved transaction exists: {existing[0].get('transaction_id')}; run recovery-audit")
         self.dir=transaction_dir(self.root);self.journal_path=self.dir/f'{self.transaction_id}.json';self.payload_dir=self.dir/self.transaction_id
         self.data={'schema_version':TRANSACTION_SCHEMA_VERSION,'transaction_id':self.transaction_id,'command':self.command,'root':str(self.root),'pid':os.getpid(),'hostname':socket.gethostname(),'started_at':now_iso(),'updated_at':now_iso(),'state':'active','operations':[],'error':''}
-        _raw_json(self.journal_path,self.data);self.token=_CURRENT.set(self)
+        # CLI calls defer publication until the first prepared mutation.
+        # Explicit Transaction.start() retains its immediate journal contract.
+        if not deferred:
+            _raw_json(self.journal_path,self.data)
+        self.token=_CURRENT.set(self)
     def should_track(self,path:Path)->bool:
         try:r=path.resolve(strict=False);require_within(r,self.root,'transaction target')
         except CliError:return False
@@ -154,11 +151,17 @@ class Transaction:
         return self._prepare('unlink',None,path,None)
     def mark_applied(self,index:int):self.data['operations'][index-1]['state']='applied';self._flush()
     def commit(self):
+        if not self.data['operations']:
+            if self.journal_path.exists():
+                self.data['state']='committed';self.data['committed_at']=now_iso();self._flush()
+            self.close();return
         self.data['state']='committed';self.data['committed_at']=now_iso();self._flush();self._cleanup_payload();self.close()
     def fail(self,message:str):
         self.data['error']=message
         if not self.data['operations']:
-            self.data['state']='aborted';self._flush();self._cleanup_payload()
+            self.data['state']='aborted'
+            if self.journal_path.exists():self._flush()
+            self._cleanup_payload()
         else:self.data['state']='failed';self._flush()
         self.close()
     def close(self):

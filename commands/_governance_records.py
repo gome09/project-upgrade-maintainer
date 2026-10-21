@@ -39,3 +39,10 @@ def read_jsonl_objects(path: Path, boundary: Path, label: str) -> list[dict[str,
 def record_snapshot(path: Path) -> dict[str,Any]:
     st=path.stat()
     return {"sha256":sha256_file(path),"size":st.st_size,"mtime_ns":st.st_mtime_ns}
+
+
+def is_approved_replay(record: dict[str, Any], proposal: dict[str, Any], plan_id: str) -> bool:
+    """Recognize the exact sealed proposal; never accept only an ID match."""
+    return record.get("approval_plan_id") == plan_id and all(
+        record.get(key) == value for key, value in proposal.items()
+    )

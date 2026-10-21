@@ -79,7 +79,7 @@ class Round14MigrationCase(unittest.TestCase):
             self.cli(root, "sync")
 
             synced = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual("18.0.0", synced["last_synced_skill_version"])
+            self.assertEqual("18.0.1", synced["last_synced_skill_version"])
             self.assertEqual(14, synced["last_synced_policy_version"])
             self.assertTrue((upgrade / "exceptions").is_dir())
             self.assertTrue((upgrade / "delivery").is_dir())

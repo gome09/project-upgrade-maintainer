@@ -171,11 +171,13 @@ def run(
         result = Result(command=args.command, root=root)
         actual_mutation = args.command in MUTATION_COMMANDS and not getattr(args, "dry_run", False)
         if actual_mutation:
-            transactional = args.command in TRANSACTIONAL_MUTATION_COMMANDS and (root / ".upgrade").exists()
-            transaction = Transaction(root, args.command) if transactional else None
-            with mutation_lock(root, operation=args.command, transaction_id=transaction.transaction_id if transaction else None):
+            candidate = Transaction(root, args.command) if args.command in TRANSACTIONAL_MUTATION_COMMANDS else None
+            transaction = None
+            with mutation_lock(root, operation=args.command, transaction_id=candidate.transaction_id if candidate else None):
+                transactional = args.command in TRANSACTIONAL_MUTATION_COMMANDS and (root / ".upgrade").exists()
+                transaction = candidate if transactional else None
                 if transaction is not None:
-                    transaction._start()
+                    transaction._start(deferred=True)
                 try:
                     HANDLERS[args.command](root, args, result)
                     if transaction is not None:

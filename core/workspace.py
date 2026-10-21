@@ -209,6 +209,7 @@ def activate_workspace_modules(
     requested = set(ordered_modules(required_modules))
     missing = requested - active
     if not missing:
+        ensure_workspace_structure(upgrade, result, dry_run, requested, writer=writer)
         return config
     ensure_workspace_structure(upgrade, result, dry_run, missing, writer=writer)
     config = dict(config)

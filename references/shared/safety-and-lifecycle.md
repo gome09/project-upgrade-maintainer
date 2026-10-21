@@ -23,6 +23,7 @@ Load for every route. Domain references add only operation-specific semantics.
 2. Apply only authorized plan entries or marker-managed changes. Write atomically in UTF-8, preserve newline/BOM/file mode where applicable, and skip unchanged content.
 3. After mutation, refresh managed inventory and append maintenance evidence. If finalization fails after a write, report `partial` and preserve a best-effort durable failure trace rather than success.
 4. Respect `.upgrade/.lock`. A same-host lock may be reclaimed automatically only when its recorded PID is provably dead; unreadable, foreign-host, permission-ambiguous, or apparently live locks remain blocking findings. Recovery never treats an ambiguous lock as stale.
+5. All mutations also hold a repository-path OS guard in the system temporary directory, including first initialization before `.upgrade/` exists. It is released automatically on process exit. Its empty backing file is retained to keep one lock identity; do not delete it to bypass contention. This guard coordinates local processes sharing the same canonical path and temporary directory, not distributed hosts or path aliases.
 
 ## Trust Boundary
 

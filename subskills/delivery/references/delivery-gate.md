@@ -1,5 +1,7 @@
 # Delivery Gate
 
+The approval dependency digest binds selected active governance records, latest validation for the exact subject/scope/environment (including non-required checks), and shared blocker/drift/unverified state. Complete histories remain integrity-validated. Unrelated scoped evidence and informational STATE updates alone do not invalidate approval. Changes to selected/global evidence, Delivery Policy, subject, recovery state, blockers or warnings still require a new review.
+
 `delivery-review` is a subject-bound evidence gate, not a generic checklist. The review must identify the exact delivery subject and the exact validation checks that are required for the requested gate.
 
 ## Subject Identity
@@ -13,6 +15,8 @@ Use one of these subject identities:
 
 `delivery-apply` recomputes path/Git subjects before accepting the saved plan. Any subject drift is a stale-plan failure and requires new validation evidence plus a new delivery review.
 
+Git subjects include indexed modes/gitlink commits and recursively fingerprint initialized submodules, including dirty worktrees. Uninitialized submodules have a distinct identity; no network fetch or initialization occurs. Unmerged indexes fail closed. POSIX file subjects include executable permissions; Windows uses indexed modes for Git files rather than unreliable POSIX executable bits. This expanded fingerprint intentionally invalidates older subject-bound evidence: rerun validation and regenerate reviews after upgrading.
+
 ## Validation Matrix
 
 Every delivery review must resolve one or more required checks. If `.upgrade/delivery/POLICY.json` exists, its approved checks for the selected gate are mandatory minima; `--require-check <check>` may add extra checks but cannot remove policy-required checks. For projects without a configured Delivery Policy, at least one explicit `--require-check` remains required. Validation evidence satisfies a required check only when all of these match the review exactly:
@@ -23,6 +27,8 @@ Every delivery review must resolve one or more required checks. If `.upgrade/del
 - `--environment` (empty is distinct from a named environment).
 
 The latest matching record must be `passed`. A different check, subject, scope, or environment cannot satisfy the gate. Non-required failed/unverified checks for the same subject/scope/environment remain visible as warnings.
+
+When approved policy controls require local execution or a maximum age, the latest required record must meet those constraints too. Future-dated evidence is rejected. Delivery apply rechecks expiry even when files have not changed; expired evidence needs a new execution/request ID and review. These controls do not authenticate the local machine, prevent clock manipulation, or certify test quality.
 
 ## Governance and Workspace State
 

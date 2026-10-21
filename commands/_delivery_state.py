@@ -227,6 +227,7 @@ def delivery_evidence_state(
     environment: str = "",
     gate: str = "readiness",
     clock: Callable[[], str] = now_iso,
+    evidence_controls: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     upgrade = verified_upgrade(root)
     at = clock()
@@ -266,6 +267,15 @@ def delivery_evidence_state(
         selected_validation[check] = record
         if record["status"] != "passed":
             blockers.append(f"required validation {check!r} latest status is {record['status']}")
+        controls = evidence_controls or {}
+        age_limit = controls.get("max_age_seconds")
+        age = (_parse_timestamp(at) - _parse_timestamp(record["timestamp"])).total_seconds()
+        if age < 0:
+            blockers.append(f"required validation {check!r} is future-dated")
+        elif age_limit is not None and age > age_limit:
+            blockers.append(f"required validation {check!r} has expired")
+        if controls.get("require_execution") and "execution" not in record:
+            blockers.append(f"required validation {check!r} requires local execution evidence")
 
     for (check, digest, record_scope, record_environment), record in sorted(validations.items(), key=lambda item: item[0]):
         if digest != subject_digest or record_scope != requested_scope or record_environment != requested_environment or check in required:
@@ -343,7 +353,18 @@ def delivery_evidence_state(
     }
     return {
         "evaluated_at": at,
-        "evidence_digest": delivery_evidence_digest(upgrade),
+        # Validate complete histories above, but bind approval only to evidence
+        # consumed by this scope/environment/subject and shared workspace state.
+        "evidence_digest": hashlib.sha256(json.dumps({
+            "decisions": decisions,
+            "risks": risks,
+            "exceptions": exceptions,
+            "validation": [record for (check, digest, record_scope, record_environment), record
+                           in sorted(validations.items(), key=lambda item: str(item[0]))
+                           if digest == subject_digest and record_scope == requested_scope
+                           and record_environment == requested_environment],
+            "workspace": workspace_summary,
+        }, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
         "summary": summary,
         "blockers": blockers,
         "warnings": warnings,

@@ -84,7 +84,13 @@ def atomic_write_bytes(path: Path, data: bytes, *, mode: int | None = None) -> N
             stream.write(data)
             stream.flush()
             if mode is not None:
-                os.fchmod(stream.fileno(), mode)
+                # ``fchmod`` is unavailable on Windows.  Preserve the mode
+                # through the descriptor where supported and use the temporary
+                # path as the portable fallback before publication.
+                if hasattr(os, "fchmod"):
+                    os.fchmod(stream.fileno(), mode)
+                else:
+                    os.chmod(temp_name, mode)
             os.fsync(stream.fileno())
         os.replace(temp_name, path)
         fsync_directory(path.parent)

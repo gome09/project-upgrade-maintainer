@@ -6,10 +6,10 @@ from core.audit import Result
 from core.constants import RISK_SCHEMA_VERSION
 from core.errors import CliError
 from core.paths import relative_posix,require_within,verified_upgrade
-from core.workspace import activate_workspace_modules,ensure_workspace_structure,preflight_mutation_workspace
+from core.workspace import activate_workspace_modules,preflight_mutation_workspace
 from core.plans import assert_file_snapshot_fresh,validate_apply_plan,write_plan_output
 from core.schemas import governance_record_digest,normalize_governance_id,seal_governance_record,validate_risk_history,validate_risk_record
-from ._governance_records import governance_record_id,read_jsonl_objects,record_snapshot
+from ._governance_records import governance_record_id,read_jsonl_objects,record_snapshot,is_approved_replay
 from ._runtime import atomic_write,build_review_plan,load_plan,now_iso, finalize_mutation
 
 def _path(upgrade:Path,id:str)->Path:return require_within(upgrade/'risks'/f'{id}.jsonl',upgrade,'risk history')
@@ -44,6 +44,10 @@ def risk_apply(root:Path,args:argparse.Namespace,result:Result)->None:
     if e.get('action')!='append' or not isinstance(e.get('record'),dict):raise CliError('risk plan entry is invalid')
     proposal=validate_risk_record(e['record'], allow_unsealed=True);p=_path(upgrade,proposal['risk_id'])
     if e.get('target')!=relative_posix(p,root):raise CliError('risk plan target does not match risk_id')
+    if p.is_file() and not p.is_symlink():
+        history=_load(p,upgrade)
+        if is_approved_replay(history[-1],proposal,plan['plan_id']):
+            result.result={'risk':history[-1],'replayed':True};return
     if proposal['revision']==1:
         if p.exists() or p.is_symlink():raise CliError(f'risk history already exists: {proposal["risk_id"]}')
         existing=[];source=None
@@ -56,7 +60,7 @@ def risk_apply(root:Path,args:argparse.Namespace,result:Result)->None:
     previous_digest=governance_record_digest(existing[-1]) if existing else None
     r=validate_risk_record(seal_governance_record(proposal,plan['plan_id'],previous_record_digest=previous_digest))
     validate_risk_history([*existing,r])
-    activate_workspace_modules(root,result,{'review'}, dry_run=args.dry_run, clock=now_iso, writer=atomic_write);ensure_workspace_structure(upgrade,result,args.dry_run,{'review'},writer=atomic_write)
+    activate_workspace_modules(root,result,{'review'}, dry_run=args.dry_run, clock=now_iso, writer=atomic_write)
     old=p.read_text(encoding='utf-8') if p.exists() else ''
     text=old+json.dumps(r,ensure_ascii=False,sort_keys=True)+'\n'
     from core.workspace import read_text_file

@@ -1,5 +1,9 @@
 # Transactions, Durability, and Recovery
 
+First initialization and later mutations use the same repository-path OS guard before checking workspace existence. Transaction eligibility is determined inside that guard, preventing a concurrent creator from changing the initialization boundary between inspection and lock acquisition. The existing `.upgrade/.lock` remains the diagnostic/owner lock after workspace creation. PID probe errors retain it; Windows uses process-handle queries rather than `os.kill`.
+
+Transactions check unresolved recovery state under the workspace lock before execution. Journal publication is deferred until an actual file operation is prepared and durably recorded before mutation. Commands with no tracked operations do not create empty journals.
+
 Workspace mutations use a local write-ahead journal under `.upgrade/transactions/`. Preimages and intended post-state hashes are durably persisted before mutation. File publication uses the shared Core durability layer: payload bytes are flushed with `fsync`, path changes use atomic replace/move where possible, and the affected parent directory is `fsync`'d on platforms/filesystems that support directory synchronization. Lock creation/removal, rollback restores, copy/move/unlink operations, and transaction-journal replacement use the same primitives.
 
 Completed transactions discard rollback payloads after the committed journal state is durable. Interrupted or partial transactions remain unresolved and block later mutation until `recovery-review` / `recovery-apply`. Recovery validates the journal schema and operation descriptors, compares current state with pre/post hashes, recognizes the safe duplicate-file window of a cross-filesystem move, and refuses automatic rollback on third-party conflicts. Corrupt or incomplete journals are governance errors, not unexpected runtime exceptions. Delivery treats unresolved recovery state as a blocker.

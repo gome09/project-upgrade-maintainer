@@ -124,7 +124,7 @@ class Round10CharacterizationCase(unittest.TestCase):
                 },
                 set(payload["result"]),
             )
-            self.assertEqual("18.0.0", payload["result"]["skill_version"])
+            self.assertEqual("18.0.1", payload["result"]["skill_version"])
             self.assertEqual(14, payload["result"]["policy_version"])
             self.assertEqual(3, payload["result"]["plan_schema_version"])
             self.assertEqual([2], payload["result"]["previous_plan_schema_versions"])
@@ -259,7 +259,7 @@ class Round10CharacterizationCase(unittest.TestCase):
                 set(plan),
             )
             self.assertEqual(3, plan["schema_version"])
-            self.assertEqual("18.0.0", plan["skill_version"])
+            self.assertEqual("18.0.1", plan["skill_version"])
             self.assertEqual(14, plan["policy_version"])
             self.assertEqual("collect", plan["kind"])
             self.assertEqual(str(root.resolve()), plan["root"])
@@ -376,7 +376,7 @@ class Round10CharacterizationCase(unittest.TestCase):
             )
             self.assertEqual("explicit", config["selection_source"])
             self.assertIsNone(config["bootstrap_recommendation"])
-            self.assertEqual("18.0.0", config["last_synced_skill_version"])
+            self.assertEqual("18.0.1", config["last_synced_skill_version"])
             self.assertEqual(14, config["last_synced_policy_version"])
             self.assertRegex(config["artifact_registry_sha256"], r"^[0-9a-f]{64}$")
             self.assertRegex(config["authority_registry_sha256"], r"^[0-9a-f]{64}$")

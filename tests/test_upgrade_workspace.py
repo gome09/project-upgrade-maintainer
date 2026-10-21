@@ -153,12 +153,12 @@ class CliCase(unittest.TestCase):
         return path
 
     def test_round11_release_contract_and_version_command(self) -> None:
-        self.assertEqual("18.0.0", UPGRADE.SKILL_VERSION)
+        self.assertEqual("18.0.1", UPGRADE.SKILL_VERSION)
         self.assertEqual(14, UPGRADE.POLICY_VERSION)
         self.assertEqual(3, UPGRADE.PLAN_SCHEMA_VERSION)
         self.assertEqual((2,), UPGRADE.PREVIOUS_PLAN_SCHEMA_VERSIONS)
         payload, _ = self.run_cli("version")
-        self.assertEqual("18.0.0", payload["result"]["skill_version"])
+        self.assertEqual("18.0.1", payload["result"]["skill_version"])
         self.assertEqual(14, payload["result"]["policy_version"])
         self.assertEqual(3, payload["result"]["plan_schema_version"])
         self.assertEqual([2], payload["result"]["previous_plan_schema_versions"])
@@ -477,7 +477,7 @@ class CliCase(unittest.TestCase):
         state_before = (self.root / ".upgrade" / "STATE.md").read_bytes()
         self.run_cli("sync")
         updated = json.loads(config_path.read_text(encoding="utf-8"))
-        self.assertEqual("18.0.0", updated["last_synced_skill_version"])
+        self.assertEqual("18.0.1", updated["last_synced_skill_version"])
         self.assertEqual(14, updated["last_synced_policy_version"])
         self.assertEqual("lean", updated["initial_profile"])
         self.assertEqual(state_before, (self.root / ".upgrade" / "STATE.md").read_bytes())

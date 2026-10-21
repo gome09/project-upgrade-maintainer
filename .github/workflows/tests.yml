@@ -9,12 +9,13 @@ permissions:
 
 jobs:
   unit:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +29,12 @@ jobs:
         run: python tools/build_skill.py --output dist/project-upgrade-maintainer.skill
 
   e2e:
-    name: E2E acceptance
-    runs-on: ubuntu-latest
+    name: E2E acceptance (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4

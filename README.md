@@ -29,6 +29,14 @@ Project Upgrade Maintainer separates responsibilities:
 
 ## Safety model
 
+Projects may opt into strict evidence controls through approved Delivery Policy:
+`--phase-check 1=suite --max-age-seconds 86400 --require-execution`.
+Use `validation-record --check suite --subject-path src --execute python -m unittest discover`
+to record a real local run; put `--execute` last. See the
+[policy controls](subskills/delivery/references/delivery-policy.md) and
+[execution boundaries](subskills/governance/references/validation.md).
+CI is configured for Ubuntu and Windows (Python 3.10–3.13), with E2E on both.
+
 Mutation is intentionally harder than inspection.
 
 ```text
@@ -184,7 +192,7 @@ The GitHub Actions workflow runs the test suite across supported Python versions
 Build the installable archive with:
 
 ```bash
-python tools/build_skill.py --output dist/project-upgrade-maintainer-18.0.0.skill
+python tools/build_skill.py --output dist/project-upgrade-maintainer-18.0.1.skill
 ```
 
 The release contains the runtime surface plus the license:

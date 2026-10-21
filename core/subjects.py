@@ -42,7 +42,8 @@ def _read_regular_or_symlink(path: Path) -> dict[str, Any]:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             size += len(chunk)
             digest.update(chunk)
-    return {"kind": "file", "sha256": digest.hexdigest(), "size": size}
+    return {"kind": "file", "sha256": digest.hexdigest(), "size": size,
+            "executable": bool(path.stat().st_mode & 0o111) if os.name != "nt" else None}
 
 
 def _looks_like_saved_plan(path: Path) -> bool:
@@ -110,7 +111,7 @@ def _git_paths(root: Path, *args: str) -> list[str]:
     return out
 
 
-def git_subject(root: Path) -> dict[str, Any] | None:
+def git_subject(root: Path, *, _seen: frozenset[Path] = frozenset()) -> dict[str, Any] | None:
     """Return a deterministic snapshot for the current Git worktree.
 
     The root must itself be the repository root. This avoids ambiguous subject
@@ -119,10 +120,20 @@ def git_subject(root: Path) -> dict[str, Any] | None:
     repo = _git_root(root)
     if repo is None or repo != root.resolve():
         return None
+    if repo in _seen:
+        raise CliError("cyclic submodule subject boundary")
+    seen = _seen | {repo}
     head_result = _git(root, "rev-parse", "HEAD")
     head = head_result.stdout.decode("utf-8", errors="replace").strip() if head_result.returncode == 0 else "unborn"
 
     tracked = _git_paths(root, "ls-files", "-z", "--cached")
+    indexed: dict[str, tuple[str, str]] = {}
+    for entry in _git_paths(root, "ls-files", "--stage", "-z"):
+        metadata, relative = entry.split("\t", 1)
+        mode, oid, stage = metadata.split()
+        if stage != "0":
+            raise CliError(f"unmerged Git subject path: {relative}")
+        indexed[relative] = (mode, oid)
     untracked = _git_paths(root, "ls-files", "-z", "--others", "--exclude-standard")
     entries: list[dict[str, Any]] = []
     for relative in sorted(set(tracked + untracked), key=str.casefold):
@@ -130,13 +141,23 @@ def git_subject(root: Path) -> dict[str, Any] | None:
         if normalized == ".upgrade" or normalized.startswith(".upgrade/") or normalized == ".git" or normalized.startswith(".git/"):
             continue
         path = require_within(root / relative, root, "Git subject path")
+        index_entry = indexed.get(relative)
+        if index_entry and index_entry[0] == "160000":
+            nested = None
+            if path.is_dir() and (path / ".git").exists():
+                nested = git_subject(path, _seen=seen)
+                if nested is None:
+                    raise CliError(f"cannot fingerprint initialized submodule: {relative}")
+            entries.append({"path": normalized, "kind": "submodule", "gitlink": index_entry[1],
+                            "worktree": nested})
+            continue
         if relative in untracked and _looks_like_saved_plan(path):
             continue
         if not path.exists() and not path.is_symlink():
             entries.append({"path": normalized, "kind": "missing"})
             continue
         descriptor = _read_regular_or_symlink(path)
-        entries.append({"path": normalized, **descriptor})
+        entries.append({"path": normalized, "index_mode": index_entry[0] if index_entry else None, **descriptor})
 
     payload = {"head": head, "entries": entries}
     return {

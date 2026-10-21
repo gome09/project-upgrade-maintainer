@@ -41,4 +41,4 @@ Prefer JSON execution evidence. Use `--view agent` for normal Skill execution an
 
 Do not request full output merely to approve/apply a plan: apply revalidates the stored full plan, exact `plan_id`, policy dependencies, implementation digest, and source snapshots.
 
-Report exit codes `2` (validation), `3` (stale plan), `4` (partial execution), and any command-specific nonzero exit as failures. Current metadata is Skill `18.0.0`, Policy `14`, Plan Schema `3`; Schema 2 plans must be regenerated.
+Report exit codes `2` (validation), `3` (stale plan), `4` (partial execution), and any command-specific nonzero exit as failures. Current metadata is Skill `18.0.1`, Policy `14`, Plan Schema `3`; Schema 2 plans must be regenerated.

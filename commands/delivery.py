@@ -12,7 +12,7 @@ from core.paths import relative_posix, require_within, verified_upgrade
 from core.plans import validate_apply_plan, write_plan_output
 from core.schemas import governance_record_digest, normalize_governance_id, validate_delivery_record
 from core.subjects import refresh_subject, resolve_subject
-from core.workspace import activate_workspace_modules, ensure_workspace_structure, preflight_mutation_workspace
+from core.workspace import activate_workspace_modules, preflight_mutation_workspace
 from ._delivery_state import delivery_evidence_state
 from ._delivery_policy import load_delivery_policy
 from ._governance_records import governance_record_id, read_json_object
@@ -43,6 +43,7 @@ def delivery_review(root: Path, args: argparse.Namespace, result: Result) -> Non
         scope=args.scope or "",
         environment=args.environment or "",
         gate=args.gate,
+        evidence_controls=policy.get("controls") if policy else None,
     )
     semantic = {
         "gate": args.gate,
@@ -150,6 +151,7 @@ def delivery_apply(root: Path, args: argparse.Namespace, result: Result) -> None
         scope=scope,
         environment=environment,
         gate=gate,
+        evidence_controls=current_policy.get("controls") if current_policy else None,
     )
     if current["evidence_digest"] != entry.get("evidence_digest"):
         raise StalePlanError("delivery governance evidence changed since review; regenerate the delivery plan")
@@ -194,7 +196,6 @@ def delivery_apply(root: Path, args: argparse.Namespace, result: Result) -> None
     if target.exists() or target.is_symlink():
         raise CliError(f"delivery record already exists: {relative_posix(target, root)}")
     activate_workspace_modules(root, result, {"review"}, dry_run=args.dry_run, clock=now_iso, writer=atomic_write)
-    ensure_workspace_structure(upgrade, result, args.dry_run, {"review"}, writer=atomic_write)
     if atomic_write(target, json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True) + "\n", dry_run=args.dry_run):
         result.change(relative_posix(target, root), "would_create" if args.dry_run else "created")
     result.result = {"delivery": record}

@@ -44,6 +44,19 @@ def _proposal(args: argparse.Namespace) -> dict:
     if not any(gates.values()):
         raise CliError("delivery policy must require at least one validation check across its gates")
     semantic = {"profile": profile, "gates": gates, "note": note}
+    phase_checks: dict[str, list[str]] = {}
+    for value in getattr(args, "phase_check", None) or []:
+        phase, separator, check = value.partition("=")
+        if not separator or not phase.isdigit() or int(phase) < 1 or not check.strip():
+            raise CliError("phase check must be PHASE=CHECK with a positive phase")
+        key = str(int(phase))
+        phase_checks[key] = _checks([*phase_checks.get(key, []), check])
+    max_age = getattr(args, "max_age_seconds", None)
+    if max_age is not None and max_age <= 0:
+        raise CliError("max-age-seconds must be positive")
+    if phase_checks or max_age is not None or getattr(args, "require_execution", False):
+        semantic["controls"] = {"phase_checks": phase_checks, "max_age_seconds": max_age,
+                                "require_execution": bool(args.require_execution)}
     return {
         "schema_version": DELIVERY_POLICY_SCHEMA_VERSION,
         "kind": "delivery-policy",

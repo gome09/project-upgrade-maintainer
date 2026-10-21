@@ -51,7 +51,7 @@ class Round16DeliveryPolicyCiCase(unittest.TestCase):
     def test_round16_release_contract(self) -> None:
         version = self.cli("version")
         result = version["result"]
-        self.assertEqual("18.0.0", result["skill_version"])
+        self.assertEqual("18.0.1", result["skill_version"])
         self.assertEqual(14, result["policy_version"])
         self.assertEqual(3, result["plan_schema_version"])
         self.assertEqual(3, result["delivery_schema_version"])

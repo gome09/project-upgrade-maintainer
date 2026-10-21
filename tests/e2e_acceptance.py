@@ -27,7 +27,7 @@ def release_contract() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         version = run(root, "version")
-        assert version["result"]["skill_version"] == "18.0.0"
+        assert version["result"]["skill_version"] == "18.0.1"
         assert version["result"]["policy_version"] == 14
         assert version["result"]["plan_schema_version"] == 3
         assert version["result"]["previous_plan_schema_versions"] == [2]

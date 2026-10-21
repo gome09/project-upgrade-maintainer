@@ -18,11 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class ReleaseHardeningCase(unittest.TestCase):
     def test_round11_release_metadata_is_consistent(self) -> None:
-        self.assertEqual("18.0.0", constants.SKILL_VERSION)
+        self.assertEqual("18.0.1", constants.SKILL_VERSION)
         self.assertEqual(14, constants.POLICY_VERSION)
         self.assertEqual(3, constants.PLAN_SCHEMA_VERSION)
         skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("Skill `18.0.0`, Policy `14`, Plan Schema `3`", skill)
+        self.assertIn("Skill `18.0.1`, Policy `14`, Plan Schema `3`", skill)
         self.assertNotIn("transitional release metadata", skill)
 
     def test_definition_of_done_structure_is_present(self) -> None:
@@ -77,7 +77,7 @@ class ReleaseHardeningCase(unittest.TestCase):
             self.assertEqual("ok", payload["status"])
 
             config = json.loads((root / ".upgrade" / "CONFIG.json").read_text(encoding="utf-8"))
-            self.assertEqual("18.0.0", config["last_synced_skill_version"])
+            self.assertEqual("18.0.1", config["last_synced_skill_version"])
             self.assertEqual(14, config["last_synced_policy_version"])
             self.assertEqual("lean", config["initial_profile"])
             self.assertIn("Preserve this Round 10 state extension.", (root / ".upgrade" / "STATE.md").read_text(encoding="utf-8"))

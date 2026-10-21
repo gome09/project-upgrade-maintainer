@@ -10,6 +10,9 @@ from core.config import load_workspace_config
 from core.workspace import TextFile, activate_workspace_modules, preflight_mutation_workspace, read_text_file, replace_section
 from ._runtime import atomic_write, now_iso, finalize_mutation
 from ._governance import cleanup_thresholds, current_phase, phase_transition_checkpoint
+from ._delivery_policy import load_delivery_policy
+from ._delivery_state import delivery_evidence_state
+from core.subjects import resolve_subject
 
 def phase_update(root: Path, args: argparse.Namespace, result: Result) -> None:
     upgrade = preflight_mutation_workspace(root, require_config=True)
@@ -44,6 +47,20 @@ def phase_update(root: Path, args: argparse.Namespace, result: Result) -> None:
         raise CliError(
             f"phase {previous_phase} must be explicitly completed before advancing; use --complete-previous with --completion-note"
         )
+
+    policy = load_delivery_policy(upgrade)
+    controls = policy.get("controls", {}) if policy else {}
+    required = controls.get("phase_checks", {}).get(str(previous_phase), [])
+    if args.phase > previous_phase and previous_phase > 0 and required:
+        subject = resolve_subject(root, subject_path=args.subject_path, subject_digest=args.subject_digest,
+                                  subject_ref=args.subject_ref)
+        gate = delivery_evidence_state(root, subject=subject, required_checks=required,
+            scope=args.scope or "", environment=args.environment or "", gate="final-acceptance",
+            evidence_controls=controls, clock=now_iso)
+        if gate["blockers"]:
+            raise CliError("phase exit gate blocked: " + "; ".join(gate["blockers"]))
+        result.result["phase_exit"] = {"policy_id": policy["policy_id"], "subject": subject,
+                                      "evidence_digest": gate["evidence_digest"], "required_checks": required}
 
     transition_kind = "refresh"
     if args.phase > previous_phase + 1:
@@ -80,6 +97,10 @@ def phase_update(root: Path, args: argparse.Namespace, result: Result) -> None:
             previous_stage_content = replace_section(previous_stage_content, "Completion Decision", "User-confirmed through --complete-previous")
             previous_stage_content = replace_section(previous_stage_content, "Completion Note", args.completion_note.strip())
             previous_stage_content = replace_section(previous_stage_content, "Completed At", now_iso())
+            if "phase_exit" in result.result:
+                import json
+                previous_stage_content = replace_section(previous_stage_content, "Exit Evidence",
+                    json.dumps(result.result["phase_exit"], ensure_ascii=False, sort_keys=True))
         elif transition_kind == "regression":
             previous_stage_content = replace_section(previous_stage_content, "Status", "regressed")
             previous_stage_content = replace_section(previous_stage_content, "Regression Note", transition_reason)
@@ -113,7 +134,8 @@ def phase_update(root: Path, args: argparse.Namespace, result: Result) -> None:
     if stage_source:
         stage_content = replace_section(stage_source.text, "Status", "in_progress")
         stage_content = replace_section(stage_content, "Current Task", args.current_task)
-        stage_content = replace_section(stage_content, "Next Action", args.next_action or "Not specified.")
+        if args.next_action is not None:
+            stage_content = replace_section(stage_content, "Next Action", args.next_action)
         if args.plan_drift is not None:
             stage_content = replace_section(stage_content, "Plan Drift", args.plan_drift)
     else:

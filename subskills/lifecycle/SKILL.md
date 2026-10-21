@@ -18,3 +18,5 @@ If loaded directly, read `../../references/shared/safety-and-lifecycle.md` first
 | Review/apply permanent trash purge | `purge-review` / `purge-apply` | `references/purge.md` |
 
 CLI classification and lazy module activation are authoritative; do not load Bootstrap merely to restate them.
+
+Choose the narrowest review for the task. `git-audit --include-artifacts` returns Git findings and full artifact classifications from one scan. `git-policy-review` already scans and classifies candidates; preceding it with both audits is optional. Use `--focus` for bounded scans. Never reuse cached scan results instead of apply-time safety checks.

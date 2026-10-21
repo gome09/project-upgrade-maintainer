@@ -494,8 +494,29 @@ def validate_validation_record(payload: Any, *, allow_legacy: bool = True) -> di
         if set(payload) != legacy_expected:
             raise CliError("unversioned validation record fields do not match the supported schema")
     else:
-        if set(payload) != current_expected or version != VALIDATION_SCHEMA_VERSION:
+        if not current_expected <= set(payload) or set(payload) - current_expected - {"request_id", "execution"} or version != VALIDATION_SCHEMA_VERSION:
             raise CliError("validation record fields do not match the supported schema")
+        if "request_id" in payload:
+            _governance_text(payload["request_id"], "validation request_id", allow_empty=False, single_line=True, max_length=500)
+        if "execution" in payload:
+            execution = payload["execution"]
+            expected_execution = {"argv", "started_at", "finished_at", "stdout_sha256", "stderr_sha256", "timed_out", "subject_unchanged"}
+            if not isinstance(execution, dict) or set(execution) != expected_execution:
+                raise CliError("invalid validation execution fields")
+            argv = execution["argv"]
+            if not isinstance(argv, list) or not argv or not all(isinstance(arg, str) and "\x00" not in arg for arg in argv) or not argv[0]:
+                raise CliError("execution argv must contain a non-empty executable and valid arguments")
+            for key in ("started_at", "finished_at"):
+                _governance_timestamp(execution[key], "execution " + key)
+            for key in ("stdout_sha256", "stderr_sha256"):
+                if not isinstance(execution[key], str) or not re.fullmatch(r"[0-9a-f]{64}", execution[key]):
+                    raise CliError("invalid execution output digest")
+            if any(not isinstance(execution[key], bool) for key in ("timed_out", "subject_unchanged")):
+                raise CliError("invalid execution outcome")
+            if payload.get("status") == "passed" and (payload.get("exit_code") != 0 or execution["timed_out"] or not execution["subject_unchanged"]):
+                raise CliError("passed execution requires exit zero and unchanged subject")
+            if payload.get("status") == "failed" and payload.get("exit_code") == 0 and not execution["timed_out"] and execution["subject_unchanged"]:
+                raise CliError("failed execution requires a failed outcome")
     out = dict(payload)
     out["timestamp"] = _governance_timestamp(payload.get("timestamp"), "validation timestamp")
     out["check"] = _governance_text(payload.get("check"), "validation check", allow_empty=False, single_line=True, max_length=500)
@@ -506,7 +527,7 @@ def validate_validation_record(payload: Any, *, allow_legacy: bool = True) -> di
         raise CliError("validation exit_code must be an integer or null")
     if payload.get("status") == "passed" and code not in {None, 0}:
         raise CliError("passed validation cannot have a non-zero exit code")
-    if payload.get("status") == "failed" and code == 0:
+    if payload.get("status") == "failed" and code == 0 and "execution" not in payload:
         raise CliError("failed validation cannot have exit code 0")
     out["environment"] = _governance_text(payload.get("environment") or "", "validation environment", single_line=True, max_length=500)
     out["scope"] = _governance_text(payload.get("scope") or "", "validation scope", max_length=2000)
@@ -534,8 +555,13 @@ def validate_validation_history(records: Any) -> list[dict[str, Any]]:
         raise CliError("validation history must be a list")
     out: list[dict[str, Any]] = []
     previous_raw: dict[str, Any] | None = None
+    request_ids: set[str] = set()
     for item in records:
         record = validate_validation_record(item)
+        if "request_id" in record:
+            if record["request_id"] in request_ids:
+                raise CliError("duplicate validation request_id")
+            request_ids.add(record["request_id"])
         if record.get("schema_version") == VALIDATION_SCHEMA_VERSION:
             expected = governance_record_digest(previous_raw) if previous_raw is not None else None
             if record.get("previous_record_digest") != expected:
@@ -609,7 +635,7 @@ def validate_delivery_policy(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise CliError("delivery policy must be a JSON object")
     expected = {"schema_version","kind","policy_id","recorded_at","profile","gates","note","authority","approval_basis","approval_plan_id","record_digest"}
-    if set(payload) != expected or payload.get("schema_version") != DELIVERY_POLICY_SCHEMA_VERSION or payload.get("kind") != "delivery-policy":
+    if set(payload) not in (expected, expected | {"controls"}) or payload.get("schema_version") != DELIVERY_POLICY_SCHEMA_VERSION or payload.get("kind") != "delivery-policy":
         raise CliError("delivery policy fields do not match the supported schema")
     out = dict(payload)
     out["recorded_at"] = _governance_timestamp(payload.get("recorded_at"), "delivery policy recorded_at")
@@ -625,6 +651,21 @@ def validate_delivery_policy(payload: Any) -> dict[str, Any]:
         raise CliError("delivery policy must require at least one validation check across its gates")
     out["gates"] = normalized_gates
     semantic = {"profile": out["profile"], "gates": out["gates"], "note": out["note"]}
+    if "controls" in payload:
+        controls = payload["controls"]
+        if not isinstance(controls, dict) or set(controls) != {"phase_checks", "max_age_seconds", "require_execution"}:
+            raise CliError("invalid delivery policy controls")
+        age = controls["max_age_seconds"]
+        if age is not None and (isinstance(age, bool) or not isinstance(age, int) or age <= 0):
+            raise CliError("validation maximum age must be positive")
+        if not isinstance(controls["require_execution"], bool) or not isinstance(controls["phase_checks"], dict):
+            raise CliError("invalid delivery policy controls")
+        for phase, checks in controls["phase_checks"].items():
+            if not isinstance(phase, str) or not phase.isdigit() or str(int(phase)) != phase or int(phase) < 1:
+                raise CliError("phase check key must be a positive canonical phase")
+            if not _governance_string_list(checks, "phase checks"):
+                raise CliError("phase checks must not be empty")
+        semantic["controls"] = controls
     out["policy_id"] = normalize_governance_id(payload.get("policy_id"), "DLP")
     if out["policy_id"] != governance_identity_id("DLP", semantic):
         raise CliError("delivery policy_id does not match governed policy content")
