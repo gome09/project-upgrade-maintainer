@@ -108,7 +108,7 @@ class Round17DurabilityCase(unittest.TestCase):
             with mock.patch("core.locking.fsync_directory", return_value=True) as fsync_dir:
                 with mutation_lock(root, operation="test"):
                     self.assertTrue((root / ".upgrade" / ".lock").is_file())
-            fsync_dir.assert_called_with(root / ".upgrade")
+            fsync_dir.assert_called_with((root / ".upgrade").resolve())
             self.assertFalse((root / ".upgrade" / ".lock").exists())
 
     def test_crash_after_file_publish_before_mark_applied_is_recoverable(self) -> None:

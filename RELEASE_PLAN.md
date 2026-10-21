@@ -14,13 +14,20 @@ Release version: 18.0.1
 - [x] Run the complete unit/integration test suite.
 - [x] Run the E2E acceptance suite.
 - [x] Build and inspect the reproducible `.skill` archive.
-- [ ] Commit all release and compatibility fixes.
-- [ ] Push `main` to GitHub over SSH.
+- [x] Commit all release and compatibility fixes.
+- [x] Push `main` to GitHub over SSH.
 - [ ] Create and push tag `v18.0.1`.
 - [ ] Create the GitHub Release and attach the `.skill` archive.
 - [ ] Verify GitHub Actions and the published release.
 
 ## Release evidence
+
+Publication update: source changes were pushed in `76dceb5`. The first remote
+matrix found a Windows test-only short/long temporary-path assertion mismatch;
+the assertion now compares the resolved path. The 12-test durability module
+passed locally (1 skipped). Runtime source and the release archive are unchanged.
+Release notes are maintained in RELEASE_NOTES_18.0.1.md. Earlier sections below
+record historical pre-publication checks, not the current publication status.
 
 Local validation for the Windows durability fix: 220 tests ran successfully, 8 skipped; E2E acceptance passed. Validation is repeated after the 18.0.1 metadata update and recorded in LIFECYCLE_GOVERNANCE_ASSESSMENT.md.
 
