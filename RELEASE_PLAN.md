@@ -16,11 +16,20 @@ Release version: 18.0.1
 - [x] Build and inspect the reproducible `.skill` archive.
 - [x] Commit all release and compatibility fixes.
 - [x] Push `main` to GitHub over SSH.
-- [ ] Create and push tag `v18.0.1`.
-- [ ] Create the GitHub Release and attach the `.skill` archive.
-- [ ] Verify GitHub Actions and the published release.
+- [x] Create and push tag `v18.0.1`.
+- [x] Create the GitHub Release and attach the `.skill` archive.
+- [x] Verify GitHub Actions and the published release.
 
 ## Release evidence
+
+Published on 2026-10-21: https://github.com/gome09/project-upgrade-maintainer/releases/tag/v18.0.1
+
+Tag `v18.0.1` points to `ac5ff0ecebf20473f8aa0ba57f6e386989157aeb`.
+CI run https://github.com/gome09/project-upgrade-maintainer/actions/runs/39596945919
+passed all 11 jobs: eight Ubuntu/Windows Python matrix jobs, two E2E jobs,
+and packaging. GitHub reports 18.0.1 as the latest non-draft, non-prerelease
+release. The uploaded asset is 165705 bytes and its server-reported SHA-256
+matches the local archive digest below. Version 18.0.0 remains available.
 
 Publication update: source changes were pushed in `76dceb5`. The first remote
 matrix found a Windows test-only short/long temporary-path assertion mismatch;

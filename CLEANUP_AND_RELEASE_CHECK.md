@@ -2,6 +2,8 @@
 
 检查日期：2026-10-21。
 
+发布后更新：用户随后授权推送与发布，现已完成。最新 Release 为 [v18.0.1](https://github.com/gome09/project-upgrade-maintainer/releases/tag/v18.0.1)，标签指向 `ac5ff0ecebf20473f8aa0ba57f6e386989157aeb`。远程 CI 的 11 项任务全部通过，上传资产的 GitHub SHA-256 与下文当前包一致。SSH 推送和 Release 写入权限已通过实际操作验证。以下“GitHub 渠道”保留清理时的历史检查结果；当前状态以 RELEASE_PLAN.md 为准。
+
 ## 已清理
 
 以下均为未纳入 Git 的旧构建或缓存，删除前已核对具体路径，不含符号链接或 junction：
