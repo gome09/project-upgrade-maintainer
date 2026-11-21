@@ -52,7 +52,7 @@ class SubjectGitEdgesCase(unittest.TestCase):
     def symlink(self, name, target, *, directory=False):
         link = self.root / name
         try:
-            link.symlink_to(target, target_is_directory=directory)
+            link.symlink_to(Path(target), target_is_directory=directory)
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f'symbolic links are unavailable: {exc}')
         return link

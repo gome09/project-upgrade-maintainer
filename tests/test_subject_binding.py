@@ -51,7 +51,7 @@ class SubjectBindingCase(unittest.TestCase):
     def link(self, name, target, *, directory=False):
         link = self.root / name
         try:
-            link.symlink_to(target, target_is_directory=directory)
+            link.symlink_to(Path(target), target_is_directory=directory)
         except (OSError, NotImplementedError) as exc:
             self.skipTest(f"symbolic links are unavailable: {exc}")
         return link
@@ -453,7 +453,8 @@ class SubjectBindingCase(unittest.TestCase):
             before = records.read_bytes()
             link_path = link.relative_to(self.root).as_posix()
             change = ("from pathlib import Path; "
-                      f"p = Path({link_path!r}); p.unlink(); p.symlink_to('../.upgrade', target_is_directory=True)")
+                      f"p = Path({link_path!r}); p.unlink(); "
+                      "p.symlink_to(Path('../.upgrade'), target_is_directory=True)")
             rejected = self.call(*validate, ".", "--request-id", "third",
                                  "--execute", sys.executable, "-c", change, expected=2)
             self.assertIn("control directory", rejected["errors"][0])
