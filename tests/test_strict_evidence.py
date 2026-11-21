@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 
 from cli.main import run
+from core.schemas import governance_record_digest
 
 
 class StrictEvidenceCase(unittest.TestCase):
@@ -38,9 +39,9 @@ class StrictEvidenceCase(unittest.TestCase):
         return self.call('validation-record', '--check', 'suite', '--subject-path', 'app.txt',
                          *extra, '--execute', sys.executable, '-c', code)
 
-    def delivery(self, *extra):
+    def delivery(self, *extra, expected=0):
         return self.call('delivery-review', '--gate', 'readiness', '--target', 'release',
-                         '--subject-path', 'app.txt', *extra)
+                         '--subject-path', 'app.txt', *extra, expected=expected)
 
     def test_manual_assertions_fail_execution_policy_and_real_execution_passes(self):
         self.policy()
@@ -72,6 +73,68 @@ class StrictEvidenceCase(unittest.TestCase):
         accepted = self.call(*args)
         self.assertEqual(['suite'], accepted['result']['phase_exit']['required_checks'])
         self.assertIn('Exit Evidence', (self.root / '.upgrade/stages/phase-1.md').read_text(encoding='utf-8'))
+
+    def test_mixed_history_warns_only_for_exact_validation_context(self):
+        (self.root / 'other.txt').write_text('other subject', encoding='utf-8')
+
+        def record(check, status, subject=None, scope='release', environment='local'):
+            binding = ('--subject-path', subject) if subject else ()
+            return self.call('validation-record', '--check', check, '--status', status,
+                             '--scope', scope, '--environment', environment, *binding)['result']['record']
+
+        context = ('--scope', 'release', '--environment', 'local', '--require-check', 'suite')
+        self.assertIsNone(record('suite', 'passed')['subject_digest'])
+        blocked = self.delivery(*context)['result']
+        self.assertFalse(blocked['eligible'])
+        self.assertIn("required validation 'suite' has no evidence for subject/scope/environment", blocked['blockers'])
+
+        self.assertIsNotNone(record('suite', 'passed', 'app.txt')['subject_digest'])
+        record('z-matching', 'failed', 'app.txt')
+        record('a-matching', 'failed', 'app.txt')
+        record('a-matching', 'passed', 'app.txt', scope='other')
+        record('wrong-subject', 'failed', 'other.txt')
+        record('wrong-scope', 'failed', 'app.txt', scope='other')
+        record('wrong-environment', 'failed', 'app.txt', environment='other')
+        record('unbound-only', 'failed')
+        record('passing', 'passed', 'app.txt')
+        result = self.delivery(*context)['result']
+        self.assertTrue(result['eligible'])
+        self.assertEqual([
+            "non-required validation 'a-matching' latest status is failed",
+            "non-required validation 'z-matching' latest status is failed",
+        ], [warning for warning in result['warnings'] if warning.startswith('non-required validation')])
+
+        path = self.root / '.upgrade/validation/records.jsonl'
+        history = [json.loads(line) for line in path.read_text(encoding='utf-8').splitlines()]
+        history[0]['note'] = 'fixture tampering'
+        history[0]['record_digest'] = governance_record_digest(history[0])
+        path.write_text('\n'.join(json.dumps(previous) for previous in history) + '\n', encoding='utf-8')
+        tampered = path.read_bytes()
+        rejected = self.delivery(*context, expected=2)
+        self.assertIn('validation evidence integrity chain', rejected['errors'][0])
+        self.assertEqual(tampered, path.read_bytes())
+
+    def test_phase_exit_with_configured_checks_and_mixed_validation_history(self):
+        self.policy()
+        self.call('phase-update', '--phase', '1', '--current-task', 'work')
+        self.call('validation-record', '--check', 'suite', '--status', 'passed',
+                  '--scope', 'release', '--environment', 'local')
+        args = ('phase-update', '--phase', '2', '--current-task', 'next', '--complete-previous',
+                '--completion-note', 'accepted', '--subject-path', 'app.txt',
+                '--scope', 'release', '--environment', 'local')
+        stages = self.root / '.upgrade/stages'
+        phase_one = (stages / 'phase-1.md').read_bytes()
+        failed = self.call(*args, expected=2)
+        self.assertIn("required validation 'suite' has no evidence", failed['errors'][0])
+        self.assertEqual([], failed['changed'])
+        self.assertEqual(phase_one, (stages / 'phase-1.md').read_bytes())
+        self.assertFalse((stages / 'phase-2.md').exists())
+
+        self.execution('print("passed")', '--scope', 'release', '--environment', 'local')
+        accepted = self.call(*args)
+        self.assertEqual(['suite'], accepted['result']['phase_exit']['required_checks'])
+        self.assertIn('Exit Evidence', (stages / 'phase-1.md').read_text(encoding='utf-8'))
+        self.assertTrue((stages / 'phase-2.md').is_file())
 
     def test_failed_command_and_mutated_subject_never_pass(self):
         self.assertEqual('failed', self.execution('raise SystemExit(7)')['result']['record']['status'])

@@ -88,6 +88,8 @@ def attention_reasons(entry: dict[str, Any], kind: str | None = None) -> list[di
         add("recoverable-delete")
     if kind == "cleanup" and action in {"update", "merge"}:
         add("content-replacement")
+    if kind == "collect" and action in {"move", "archive"}:
+        add("source-relocation")
     if kind == "git-policy" and action == "add-ignore":
         add("git-ignore-change")
     if kind == "authority" and action in {"register", "rebind", "unregister"}:
@@ -118,6 +120,8 @@ def _compact_attention_entry(
         item["action"] = entry["action"]
     if key and value:
         item[key] = value
+    if kind == "collect" and entry.get("destination"):
+        item["destination"] = entry["destination"]
     if entry.get("reason"):
         item["reason"] = entry["reason"]
     for flag in ("protected", "protected_authorized", "sensitive", "sensitive_authorized", "recoverable", "eligible"):
@@ -157,6 +161,9 @@ def _abnormal_result_attention(value: Any, *, path: str = "result") -> list[dict
             code, severity = "blocker", "blocker"
         if isinstance(conflicts, list) and conflicts:
             code, severity = "conflict", "blocker"
+        sensitive = value.get("classification") == "sensitive"
+        if sensitive and code is None:
+            code = "sensitive-material"
         if code:
             key, subject = _subject(value)
             item: dict[str, Any] = {"code": code, "severity": severity, "source": path, "detail_ref": "full-view"}
@@ -164,6 +171,10 @@ def _abnormal_result_attention(value: Any, *, path: str = "result") -> list[dict
                 item[key] = subject
             if isinstance(status, str):
                 item["status"] = status
+            if sensitive:
+                item["classification"] = value["classification"]
+                if isinstance(value.get("reason"), str):
+                    item["reason"] = value["reason"]
             if isinstance(blockers, list) and blockers:
                 item["blockers"] = blockers
             if isinstance(conflicts, list) and conflicts:
@@ -282,7 +293,7 @@ def agent_payload(result: Result) -> dict[str, Any]:
         next_action = "review-attention-before-approval"
     elif plan is not None and executable:
         next_action = "review-summary-before-approval"
-    elif result.warnings:
+    elif result.warnings or any(item.get("classification") == "sensitive" for item in unique_result_attention):
         next_action = "review-warnings"
     else:
         next_action = "complete"

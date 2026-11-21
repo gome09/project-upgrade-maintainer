@@ -106,6 +106,8 @@ def inspect_plan(root: Path, args: argparse.Namespace, result: Result) -> None:
                 item["_attention"] = reasons
             rendered.append(item)
 
+    next_offset = args.offset + len(rendered)
+    has_more = args.section != "summary" and next_offset < total
     result.plan_id = str(plan.get("plan_id") or "") or None
     result.result = {
         "plan": {
@@ -126,7 +128,7 @@ def inspect_plan(root: Path, args: argparse.Namespace, result: Result) -> None:
         "offset": args.offset,
         "limit": args.limit,
         "returned": len(rendered),
-        "has_more": args.offset + len(rendered) < total,
-        "next_offset": args.offset + len(rendered) if args.offset + len(rendered) < total else None,
+        "has_more": has_more,
+        "next_offset": next_offset if has_more else None,
         "entries": rendered,
     }

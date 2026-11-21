@@ -2,7 +2,20 @@
 
 Repository: https://github.com/gome09/project-upgrade-maintainer.git
 Remote transport: SSH (`git@github.com:gome09/project-upgrade-maintainer.git`)
-Release version: 18.0.1
+Current release candidate: 18.0.2
+
+## 18.0.2 release candidate
+
+The runtime files from the independently reviewed `final_skill` are present in
+this repository with the new version metadata. The release archive contains
+88 runtime files and passes ZIP integrity, source comparison, reproducibility,
+and the unpacked CLI version check.
+
+Asset: `dist/project-upgrade-maintainer-18.0.2.skill`.
+
+SHA-256: `52e9e952e3f0ed858d637f61b7baf69441cef04cd2bb893d9fb5c0a999281900`.
+
+## 18.0.1 release record
 
 ## Checklist
 

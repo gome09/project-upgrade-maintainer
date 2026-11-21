@@ -11,7 +11,7 @@ Thin router for `.upgrade/` governance. Use the bundled deterministic CLI; do no
 
 - Require explicit `$project-upgrade-maintainer` invocation.
 - Always read [references/shared/safety-and-lifecycle.md](references/shared/safety-and-lifecycle.md).
-- Route each intent to one domain subskill, except `version` and `recovery-*`, which are Core operations. Load only the routed references.
+- Route each intent to one domain subskill, except `version`, `inspect`, and `recovery-*`, which are Core operations. Load only the routed references.
 - For cross-domain requests, execute each operation under its own route instead of loading all domains together.
 
 ## Intent Router
@@ -23,7 +23,7 @@ Thin router for `.upgrade/` governance. Use the bundled deterministic CLI; do no
 | `phase-update`, `validation-record`, `decision-*`, `risk-*` | Governance | [subskills/governance/SKILL.md](subskills/governance/SKILL.md) |
 | `delivery-policy-*`, `exception-*`, `delivery-*` | Delivery | [subskills/delivery/SKILL.md](subskills/delivery/SKILL.md) |
 | `recovery-*` | Core recovery | [references/shared/transactions-and-recovery.md](references/shared/transactions-and-recovery.md) |
-| `version` | Core diagnostics | no additional reference |
+| `version`, `inspect` | Core diagnostics | no additional reference |
 
 ## Shared Safety
 
@@ -41,4 +41,4 @@ Prefer JSON execution evidence. Use `--view agent` for normal Skill execution an
 
 Do not request full output merely to approve/apply a plan: apply revalidates the stored full plan, exact `plan_id`, policy dependencies, implementation digest, and source snapshots.
 
-Report exit codes `2` (validation), `3` (stale plan), `4` (partial execution), and any command-specific nonzero exit as failures. Current metadata is Skill `18.0.1`, Policy `14`, Plan Schema `3`; Schema 2 plans must be regenerated.
+Report exit codes `2` (validation), `3` (stale plan), `4` (partial execution), and any command-specific nonzero exit as failures. Current metadata is Skill `18.0.2`, Policy `14`, Plan Schema `3`; Schema 2 plans must be regenerated.

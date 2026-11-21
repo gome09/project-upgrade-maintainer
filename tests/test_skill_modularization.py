@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unittest
 from pathlib import Path
+from cli.parser import build_parser
 
 
 SKILL_ROOT = Path(__file__).resolve().parents[1]
@@ -66,6 +67,7 @@ class SkillModularizationCase(unittest.TestCase):
             "risk-*": "Governance",
             "recovery-*": "Core recovery",
             "version": "Core diagnostics",
+            "inspect": "Core diagnostics",
         }
         for command, domain in expected.items():
             with self.subTest(command=command):
@@ -74,6 +76,9 @@ class SkillModularizationCase(unittest.TestCase):
                 self.assertIn(domain, matching[0])
         self.assertIn("`exception-*`, `delivery-*`", joined)
         self.assertIn("Delivery", joined)
+        self.assertEqual("inspect", build_parser().parse_args(["inspect", "--plan", "review.json"]).command)
+        inspect_route = next(row for row in rows if "`inspect`" in row)
+        self.assertIn("no additional reference", inspect_route)
 
     def test_phase_e_removes_legacy_reference_mirrors_after_rebind(self) -> None:
         legacy = (

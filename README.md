@@ -192,7 +192,7 @@ The GitHub Actions workflow runs the test suite across supported Python versions
 Build the installable archive with:
 
 ```bash
-python tools/build_skill.py --output dist/project-upgrade-maintainer-18.0.1.skill
+python tools/build_skill.py --output dist/project-upgrade-maintainer-18.0.2.skill
 ```
 
 The release contains the runtime surface plus the license:

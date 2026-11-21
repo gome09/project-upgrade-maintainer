@@ -2,12 +2,13 @@
 from __future__ import annotations
 import argparse
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 from core.constants import *
 from core.audit import Result
 from core.errors import CliError
-from core.durability import durable_mkdir
+from core.durability import fsync_directory
 from core.schemas import ordered_modules
 from core.paths import relative_posix
 from core.artifacts import artifact_registry_digest, empty_artifact_registry, load_artifact_registry
@@ -19,6 +20,8 @@ from ._inventory import git_inventory_paths, git_repo_root, ignored_collect_path
 from ._common import walk_files
 from ._workspace import modules_for_profile, normalized_profile_name
 from ._bridges import plan_governance_contract_update, plan_workspace_readme_update, plan_guardrail_updates, sync_guardrails, sync_planned_texts, root_agent_instruction_files, nested_agent_instruction_files
+
+_INITIALIZE_STAGE_PREFIX = ".upgrade-initialize-"
 
 def bootstrap_path_signals(root: Path, files: list[Path]) -> dict[str, Any]:
     relatives = [relative_posix(path, root) for path in files]
@@ -218,6 +221,40 @@ def bootstrap_review(root: Path, args: argparse.Namespace, result: Result) -> No
     }
 
 
+def _publish_initial_config(root: Path, upgrade: Path, config: dict[str, Any], result: Result) -> None:
+    published = False
+    try:
+        with tempfile.TemporaryDirectory(prefix=_INITIALIZE_STAGE_PREFIX, dir=root) as directory:
+            container = Path(directory)
+            # The existing nested bridge scan already prunes .upgrade at each depth.
+            pending = container / ".upgrade"
+            # The container is private. The published directory has normal
+            # workspace permissions, as if it were created with mkdir directly.
+            pending.mkdir()
+            staged = Result(result.command, root)
+            written = write_workspace_config(pending, config, staged, dry_run=False, writer=atomic_write)
+            if not written or load_workspace_config(pending) != config:
+                raise CliError("initial workspace configuration was not written as selected")
+            try:
+                upgrade.lstat()
+            except FileNotFoundError:
+                pass
+            else:
+                raise CliError(".upgrade appeared before initial configuration could be published")
+            # The repository guard is held by the caller. Rename is the
+            # publication boundary, with no copy fallback.
+            pending.rename(upgrade)
+            published = True
+            result.change(".upgrade", "created")
+            result.changed.extend(staged.changed)
+            fsync_directory(root)
+            fsync_directory(container)
+    except OSError as exc:
+        if published:
+            raise CliError(f"initial configuration was published but directory sync or cleanup failed: {exc}") from exc
+        raise CliError(f"cannot prepare or publish initial workspace configuration: {exc}") from exc
+
+
 def initialize(root: Path, args: argparse.Namespace, result: Result) -> None:
     upgrade = preflight_mutation_workspace(root, allow_missing=True)
     dry_run = args.dry_run
@@ -323,13 +360,15 @@ def initialize(root: Path, args: argparse.Namespace, result: Result) -> None:
 
     config["artifact_registry_sha256"] = registry_digest
     config["authority_registry_sha256"] = authority_digest
-    if not upgrade.exists():
-        if not dry_run:
-            durable_mkdir(upgrade)
-        result.change(".upgrade", "would_create" if dry_run else "created")
+    if not existed:
+        if dry_run:
+            result.change(".upgrade", "would_create")
+        else:
+            _publish_initial_config(root, upgrade, config, result)
     ensure_workspace_structure(upgrade, result, dry_run, config["active_modules"], writer=atomic_write)
     sync_planned_texts(root, result, dry_run, planned_contract, planned_readme, planned_authority_view)
-    write_workspace_config(upgrade, config, result, dry_run=dry_run, writer=atomic_write)
+    if existed or dry_run:
+        write_workspace_config(upgrade, config, result, dry_run=dry_run, writer=atomic_write)
     sync_guardrails(root, result, dry_run, planned_guardrails)
     result.result["workspace"] = {
         "initial_profile": config["initial_profile"],

@@ -11,15 +11,17 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from .constants import PLAN_SCHEMA_VERSION
 from .errors import CliError
-from .paths import relative_posix, require_within
+from .paths import require_within
 
 _SHA256_RE = __import__("re").compile(r"[0-9a-f]{64}")
+_MOUNT_POINT_TAG = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003)
 
 
 def _hash_bytes(data: bytes) -> str:
@@ -31,32 +33,58 @@ def _canonical_digest(value: Any) -> str:
     return _hash_bytes(encoded)
 
 
-def _read_regular_or_symlink(path: Path) -> dict[str, Any]:
-    if path.is_symlink():
-        return {"kind": "symlink", "target": os.readlink(path)}
-    if not path.is_file():
-        raise CliError(f"subject contains a non-regular file: {path}")
+def _path_order(name: str) -> tuple[str, str]:
+    return name.casefold(), name
+
+
+def _excluded(relative: str) -> bool:
+    return relative in {".git", ".upgrade"} or relative.startswith((".git/", ".upgrade/"))
+
+
+def _link_kind(path: Path) -> str | None:
+    try:
+        info = path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as exc:
+        raise CliError(f"cannot inspect subject path: {path}: {exc}") from exc
+    if stat.S_ISLNK(info.st_mode):
+        return "symlink"
+    if getattr(info, "st_reparse_tag", None) == _MOUNT_POINT_TAG:
+        return "junction"
+    return None
+
+
+def _read_regular_file(path: Path) -> dict[str, Any]:
     digest = hashlib.sha256()
     size = 0
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            size += len(chunk)
-            digest.update(chunk)
+    try:
+        mode = path.stat().st_mode
+        if not stat.S_ISREG(mode):
+            raise CliError(f"subject contains a non-regular file: {path}")
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                size += len(chunk)
+                digest.update(chunk)
+    except OSError as exc:
+        raise CliError(f"cannot read subject file: {path}: {exc}") from exc
     return {"kind": "file", "sha256": digest.hexdigest(), "size": size,
-            "executable": bool(path.stat().st_mode & 0o111) if os.name != "nt" else None}
+            "executable": bool(mode & 0o111) if os.name != "nt" else None}
 
 
 def _looks_like_saved_plan(path: Path) -> bool:
-    """Exclude untracked saved Plan Schema files from a Git subject snapshot.
+    """Recognize saved review plans for exclusion from directory and Git subjects.
 
     Review plan output is an authorization artifact, not product source.  The
     check is deliberately narrow and does not trust or execute the plan.
     """
-    if not path.is_file() or path.is_symlink() or path.stat().st_size > 4 * 1024 * 1024:
-        return False
     try:
+        if not path.is_file() or path.is_symlink() or path.stat().st_size > 4 * 1024 * 1024:
+            return False
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except OSError as exc:
+        raise CliError(f"cannot read subject file: {path}: {exc}") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError):
         return False
     if not (
         isinstance(value, dict)
@@ -71,6 +99,60 @@ def _looks_like_saved_plan(path: Path) -> bool:
     canonical = dict(value)
     canonical.pop("plan_id", None)
     return recorded == _canonical_digest(canonical)
+
+
+def _directory_link_error(path: Path, reason: str) -> CliError:
+    return CliError(
+        f"subject directory link is not covered: {path}: {reason}. "
+        "Select a common physical directory that covers the source and its real dependencies, "
+        "select an unambiguous physical delivery artifact if the subtree is unsupported, "
+        "or specify an immutable artifact digest and reference."
+    )
+
+
+def _read_link(
+    path: Path, kind: str, root: Path, *,
+    tracked: dict[str, tuple[str, str]] | None = None,
+    directories: dict[Path, Path] | None = None,
+) -> dict[str, Any]:
+    try:
+        target_text = os.readlink(path)
+        target_text.encode("utf-8")
+        descriptor: dict[str, Any] = {"kind": kind, "target": target_text}
+        try:
+            target = path.resolve(strict=True)
+            mode = target.stat().st_mode
+        except (FileNotFoundError, NotADirectoryError):
+            # Strict resolution also detects loops on Python versions where
+            # non-strict resolution would silently leave an unresolved link.
+            target = path.resolve(strict=False)
+            mode = None
+        try:
+            relative = target.relative_to(root)
+        except ValueError as exc:
+            raise CliError(f"subject link target resolves outside allowed boundary: {path}") from exc
+        if mode is None:
+            return descriptor
+        control_target = bool(relative.parts) and Path(relative.parts[0]) in {Path(".git"), Path(".upgrade")}
+        if stat.S_ISDIR(mode):
+            if control_target:
+                raise _directory_link_error(path, "its target is a repository control directory")
+            if directories is None:
+                raise _directory_link_error(path, "Git subjects cannot bind directory link targets")
+            directories[path] = target
+            return descriptor
+        if not stat.S_ISREG(mode):
+            raise CliError(f"subject link target is not a regular file or directory: {path}")
+        if control_target:
+            return descriptor
+        # Git snapshots include tracked plan files. Directory snapshots exclude
+        # recognized plans regardless of whether another snapshot tracks them.
+        if (tracked is None or relative.as_posix() not in tracked) and _looks_like_saved_plan(target):
+            return descriptor
+        descriptor["target_file"] = _read_regular_file(target)
+        return descriptor
+    except (OSError, RuntimeError, UnicodeEncodeError) as exc:
+        raise CliError(f"cannot fingerprint subject link: {path}: {exc}") from exc
 
 
 def _git(root: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
@@ -111,6 +193,30 @@ def _git_paths(root: Path, *args: str) -> list[str]:
     return out
 
 
+def _git_worktree_links(root: Path, paths: list[str]) -> tuple[dict[str, str], set[str]]:
+    """Keep each link at its own path even if Git lists paths under it."""
+    known: dict[str, str | None] = {}
+    links: dict[str, str] = {}
+    shadowed: set[str] = set()
+    for relative in paths:
+        raw = Path(relative)
+        if raw.anchor or ".." in raw.parts:
+            raise CliError(f"Git subject path resolves outside allowed boundary: {relative}")
+        path = root
+        for part in raw.parts:
+            path /= part
+            name = path.relative_to(root).as_posix()
+            if name not in known:
+                known[name] = _link_kind(path)
+            link_kind = known[name]
+            if link_kind:
+                links[name] = link_kind
+                if name != relative:
+                    shadowed.add(relative)
+                break
+    return links, shadowed
+
+
 def git_subject(root: Path, *, _seen: frozenset[Path] = frozenset()) -> dict[str, Any] | None:
     """Return a deterministic snapshot for the current Git worktree.
 
@@ -134,30 +240,48 @@ def git_subject(root: Path, *, _seen: frozenset[Path] = frozenset()) -> dict[str
         if stage != "0":
             raise CliError(f"unmerged Git subject path: {relative}")
         indexed[relative] = (mode, oid)
-    untracked = _git_paths(root, "ls-files", "-z", "--others", "--exclude-standard")
+    untracked = set(_git_paths(root, "ls-files", "-z", "--others", "--exclude-standard"))
+    paths = sorted(
+        (relative for relative in set(tracked) | untracked if not _excluded(relative)),
+        key=_path_order,
+    )
+    links, shadowed = _git_worktree_links(repo, paths)
     entries: list[dict[str, Any]] = []
-    for relative in sorted(set(tracked + untracked), key=str.casefold):
-        normalized = relative.replace("\\", "/")
-        if normalized == ".upgrade" or normalized.startswith(".upgrade/") or normalized == ".git" or normalized.startswith(".git/"):
+    for relative in sorted(set(paths) | links.keys(), key=_path_order):
+        path = repo / relative
+        link_kind = links.get(relative)
+        # Git reports slash-separated paths. Keep literal backslashes in link
+        # identities and retain the historical spelling for ordinary entries.
+        recorded_path = relative if link_kind or relative in shadowed else relative.replace("\\", "/")
+        if _excluded(recorded_path):
             continue
-        path = require_within(root / relative, root, "Git subject path")
         index_entry = indexed.get(relative)
         if index_entry and index_entry[0] == "160000":
             nested = None
-            if path.is_dir() and (path / ".git").exists():
+            if link_kind is None and relative not in shadowed and path.is_dir() and (path / ".git").exists():
                 nested = git_subject(path, _seen=seen)
                 if nested is None:
                     raise CliError(f"cannot fingerprint initialized submodule: {relative}")
-            entries.append({"path": normalized, "kind": "submodule", "gitlink": index_entry[1],
-                            "worktree": nested})
+            descriptor = {"path": recorded_path, "kind": "submodule", "gitlink": index_entry[1],
+                          "worktree": nested}
+            if link_kind:
+                descriptor["link"] = _read_link(path, link_kind, repo, tracked=indexed)
+            entries.append(descriptor)
             continue
-        if relative in untracked and _looks_like_saved_plan(path):
+        if link_kind:
+            descriptor = _read_link(path, link_kind, repo, tracked=indexed)
+        elif relative in shadowed:
+            if index_entry:
+                entries.append({"path": recorded_path, "kind": "missing"})
             continue
-        if not path.exists() and not path.is_symlink():
-            entries.append({"path": normalized, "kind": "missing"})
+        elif relative in untracked and _looks_like_saved_plan(path):
             continue
-        descriptor = _read_regular_or_symlink(path)
-        entries.append({"path": normalized, "index_mode": index_entry[0] if index_entry else None, **descriptor})
+        elif not path.exists():
+            entries.append({"path": recorded_path, "kind": "missing"})
+            continue
+        else:
+            descriptor = _read_regular_file(path)
+        entries.append({"path": recorded_path, "index_mode": index_entry[0] if index_entry else None, **descriptor})
 
     payload = {"head": head, "entries": entries}
     return {
@@ -169,44 +293,90 @@ def git_subject(root: Path, *, _seen: frozenset[Path] = frozenset()) -> dict[str
 
 
 def path_subject(root: Path, value: str) -> dict[str, Any]:
+    root = root.resolve()
     raw = Path(value)
     path = raw if raw.is_absolute() else root / raw
-    path = require_within(path, root, "subject path")
-    if not path.exists() and not path.is_symlink():
-        raise CliError(f"subject path does not exist: {relative_posix(path, root)}")
-    relative = relative_posix(path, root)
-    if path.is_symlink():
-        raise CliError("subject path itself must not be a symlink")
-    if path.is_file():
-        descriptor = _read_regular_or_symlink(path)
+    link_kind = _link_kind(path)
+    if link_kind:
+        raise CliError(f"subject path ends at a {link_kind}: {path}. Use the target's repository path.")
+    try:
+        path = require_within(path, root, "subject path")
+    except (OSError, RuntimeError) as exc:
+        raise CliError(f"cannot resolve subject path: {path}: {exc}") from exc
+    relative = path.relative_to(root).as_posix()
+    try:
+        mode = path.stat().st_mode
+    except (FileNotFoundError, NotADirectoryError) as exc:
+        raise CliError(f"subject path does not exist: {relative}") from exc
+    except OSError as exc:
+        raise CliError(f"cannot inspect subject path: {path}: {exc}") from exc
+    if stat.S_ISREG(mode):
+        descriptor = _read_regular_file(path)
         payload = {"root": relative, **descriptor}
         return {"type": "path", "ref": relative, "digest": _canonical_digest(payload), "file_count": 1}
-    if not path.is_dir():
+    if not stat.S_ISDIR(mode):
         raise CliError("subject path must be a regular file or directory")
 
     entries: list[dict[str, Any]] = []
-    for current, dirs, files in os.walk(path, topdown=True, followlinks=False):
+    visited: dict[Path, str] = {}
+    unbound_ancestors: set[Path] = set()
+    directories: dict[Path, Path] = {}
+
+    def scan_error(exc: OSError) -> None:
+        raise CliError(f"cannot scan subject directory: {exc.filename or path}: {exc}") from exc
+
+    for current, dirs, files in os.walk(path, topdown=True, onerror=scan_error, followlinks=False):
         current_path = Path(current)
+        if _link_kind(current_path):
+            raise CliError(f"subject directory changed to a link during scan: {current_path}")
+        visited[current_path] = current_path.relative_to(path).as_posix()
         safe_dirs: list[str] = []
-        for name in sorted(dirs, key=str.casefold):
+        for name in sorted(dirs, key=_path_order):
             child = current_path / name
-            rel_root = relative_posix(child, root)
-            if rel_root == ".upgrade" or rel_root.startswith(".upgrade/") or rel_root == ".git" or rel_root.startswith(".git/"):
+            if _excluded(child.relative_to(root).as_posix()):
+                unbound_ancestors.update(child.parents)
                 continue
-            if child.is_symlink():
-                entries.append({"path": relative_posix(child, path), **_read_regular_or_symlink(child)})
+            link_kind = _link_kind(child)
+            if link_kind:
+                unbound_ancestors.update(child.parents)
+                descriptor = _read_link(child, link_kind, root, directories=directories)
+                entries.append({"path": child.relative_to(path).as_posix(), **descriptor})
             else:
                 safe_dirs.append(name)
         dirs[:] = safe_dirs
-        for name in sorted(files, key=str.casefold):
-            child = require_within(current_path / name, root, "subject file")
-            rel_root = relative_posix(child, root)
-            if rel_root == ".upgrade" or rel_root.startswith(".upgrade/") or rel_root == ".git" or rel_root.startswith(".git/"):
+        for name in sorted(files, key=_path_order):
+            child = current_path / name
+            if _excluded(child.relative_to(root).as_posix()):
+                unbound_ancestors.update(child.parents)
                 continue
-            if _looks_like_saved_plan(child):
+            link_kind = _link_kind(child)
+            if link_kind:
+                unbound_ancestors.update(child.parents)
+                descriptor = _read_link(child, link_kind, root, directories=directories)
+            elif _looks_like_saved_plan(child):
+                unbound_ancestors.update(child.parents)
                 continue
-            entries.append({"path": relative_posix(child, path), **_read_regular_or_symlink(child)})
+            else:
+                descriptor = _read_regular_file(child)
+            entries.append({"path": child.relative_to(path).as_posix(), **descriptor})
     payload = {"root": relative, "entries": entries}
+    if directories:
+        targets = set(directories.values())
+        for entry in entries:
+            link = path / entry["path"]
+            if link not in directories:
+                continue
+            target = directories[link]
+            if target not in visited:
+                raise _directory_link_error(link, "its target was not visited in the selected physical tree")
+            if target in unbound_ancestors:
+                raise _directory_link_error(link, "its target subtree contains a link or excluded content")
+            entry["target_directory"] = visited[target]
+        payload["linked_directories"] = sorted(
+            (name for directory, name in visited.items()
+             if directory in targets or not targets.isdisjoint(directory.parents)),
+            key=_path_order,
+        )
     return {"type": "path", "ref": relative, "digest": _canonical_digest(payload), "file_count": len(entries)}
 
 

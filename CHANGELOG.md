@@ -5,6 +5,19 @@ All notable changes to Project Upgrade Maintainer are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and releases use [Semantic Versioning](https://semver.org/).
 
+## [18.0.2] - 2026-11-21
+
+### Fixed
+
+- Reject directory-link subjects whose targets fall outside the validation
+  snapshot, and invalidate prior approvals when a bound link changes.
+- Recover interrupted transactions that wrote the same file more than once,
+  while preserving conflict checks and exact approval requirements.
+- Preserve the selected workspace profile after interrupted initialization and
+  restore missing maintenance records on retry.
+- Keep delivery reviews usable with mixed subject-bound and unbound evidence,
+  and make compact review details accessible through `inspect`.
+
 ## [18.0.1] - 2026-10-21
 
 ### Fixed
@@ -51,5 +64,6 @@ and releases use [Semantic Versioning](https://semver.org/).
 - Repository-discovered instructions remain untrusted context and cannot
   authorize mutations by themselves.
 
+[18.0.2]: https://github.com/gome09/project-upgrade-maintainer/releases/tag/v18.0.2
 [18.0.1]: https://github.com/gome09/project-upgrade-maintainer/releases/tag/v18.0.1
 [18.0.0]: https://github.com/gome09/project-upgrade-maintainer/releases/tag/v18.0.0

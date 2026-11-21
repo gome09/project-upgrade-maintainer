@@ -1,15 +1,17 @@
 """Durable write-ahead filesystem transaction journal and crash recovery."""
 from __future__ import annotations
-import contextvars, hashlib, json, os, re, socket, uuid
+import contextvars, hashlib, json, os, re, socket, stat, uuid
 from pathlib import Path
 from typing import Any
 from .audit import now_iso
 from .constants import TRANSACTION_SCHEMA_VERSION
-from .errors import CliError
+from .errors import CliError, StalePlanError
 from .durability import atomic_write_bytes, durable_copy_file, durable_mkdir, durable_move_file, durable_rmtree, durable_unlink
 from .paths import relative_posix, require_within, verified_upgrade
 
 _CURRENT: contextvars.ContextVar['Transaction|None']=contextvars.ContextVar('upgrade_transaction',default=None)
+_JOURNAL_DIR = Path(".upgrade") / "transactions"
+_MOUNT_POINT_TAG = getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003)
 
 def current_transaction(): return _CURRENT.get()
 
@@ -196,31 +198,257 @@ class Transaction:
             if dst and not dst.exists():return 'applied'
             if same(dst,pre):return 'not_applied'
         return 'conflict'
-    def analysis(self)->list[dict[str,Any]]:return [{'index':op['index'],'kind':op['kind'],'state':self.classify(op)} for op in self.data.get('operations',[])]
-    def rollback(self):
-        analysis={x['index']:x['state'] for x in self.analysis()}
-        if any(v=='conflict' for v in analysis.values()):raise CliError('transaction recovery conflict; automatic rollback refused')
-        self.data['state']='rolling_back';self._flush()
-        for op in reversed(self.data.get('operations',[])):
-            if analysis[op['index']] not in {'applied','duplicated'}:continue
-            kind=op['kind'];src=self._path(op.get('source'));dst=self._path(op.get('target'));backup=self._path(op.get('backup'))
-            if kind=='write':
-                if op['pre_target'].get('exists'):
-                    if not backup or not backup.is_file():raise CliError('transaction rollback payload is missing')
-                    durable_copy_file(backup,dst)
-                elif dst.exists():durable_unlink(dst)
-            elif kind=='move':
-                if analysis[op['index']]=='duplicated':
-                    durable_unlink(dst)
-                else:
-                    durable_move_file(dst,src)
-            elif kind=='copy':
-                if dst.exists():durable_unlink(dst)
-            elif kind=='unlink':
-                if not backup or not backup.is_file():raise CliError('transaction rollback payload is missing')
-                durable_copy_file(backup,dst)
-            op['state']='rolled_back';self._flush()
-        self.data['state']='rolled_back';self.data['rolled_back_at']=now_iso();self._flush();self._cleanup_payload()
+    def _path_key(self, value: str) -> Path:
+        # Group even a noncanonical spelling of the same address. The on-disk
+        # checks still require the exact relative spelling emitted by the writer.
+        return Path(os.path.normpath(self.root / value))
+
+    def _write_chains(self) -> dict[Path, list[dict[str, Any]]]:
+        groups: dict[Path, list[dict[str, Any]]] = {}
+        for op in self.data['operations']:
+            if op['kind'] == 'write' and op['target']:
+                groups.setdefault(self._path_key(op['target']), []).append(op)
+        return {path: ops for path, ops in groups.items() if len(ops) > 1}
+
+    def _checked_recovery_path(self, value: str, *, directory: bool = False) -> Path:
+        try:
+            raw = Path(value)
+            if raw.anchor or not raw.parts or '..' in raw.parts or raw.as_posix() != value:
+                raise CliError(f'noncanonical transaction record path: {value}')
+            path = self.root
+            for index, part in enumerate(raw.parts, 1):
+                path /= part
+                try:
+                    info = path.lstat()
+                except FileNotFoundError:
+                    break
+                if stat.S_ISLNK(info.st_mode) or getattr(info, 'st_reparse_tag', None) == _MOUNT_POINT_TAG:
+                    raise CliError(f'transaction recovery path contains a link: {path}')
+                is_expected_type = stat.S_ISDIR if directory or index < len(raw.parts) else stat.S_ISREG
+                if not is_expected_type(info.st_mode):
+                    raise CliError(f'transaction recovery path has an unexpected type: {path}')
+            path = self.root / raw
+            if require_within(path, self.root, 'transaction record path') != path:
+                raise CliError(f'noncanonical physical transaction record path: {value}')
+            return path
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise CliError(f'cannot verify transaction record path: {value}: {exc}') from exc
+
+    @staticmethod
+    def _recovery_descriptor(path: Path) -> dict[str, Any]:
+        try:
+            return _descriptor(path)
+        except OSError as exc:
+            raise CliError(f'cannot read transaction recovery file: {path}: {exc}') from exc
+
+    def _checked_backup(self, op: dict[str, Any]) -> Path | None:
+        before = op['pre_target']
+        if not before['exists']:
+            if op['backup'] is not None:
+                raise CliError(f'unexpected backup for operation {op["index"]}')
+            return None
+        filename = f'{op["index"]:06d}.bak'
+        expected = (_JOURNAL_DIR / self.transaction_id / filename).as_posix()
+        if op['backup'] != expected or len(filename) != 10:
+            raise CliError(f'invalid backup location for operation {op["index"]}')
+        backup = self._checked_recovery_path(expected)
+        if self._recovery_descriptor(backup) != before:
+            raise CliError(f'missing or changed transaction backup: {expected}')
+        return backup
+
+    @staticmethod
+    def _post_matches(op: dict[str, Any], descriptor: dict[str, Any]) -> bool:
+        return descriptor['exists'] and descriptor['sha256'] == op['post_sha256']
+
+    def _write_action(
+        self, op: dict[str, Any], current: dict[str, Any],
+        next_pre: dict[str, Any] | None, *, may_have_undone: bool,
+    ) -> str:
+        at_pre = current == op['pre_target']
+        expected = (current == next_pre if next_pre is not None else
+                    self._post_matches(op, current) or (op['state'] == 'prepared' and at_pre))
+        if expected or (may_have_undone and at_pre):
+            return 'not_applied' if at_pre else 'applied'
+        return 'conflict'
+
+    def _rollback_boundary(self) -> int | None:
+        state = self.data['state']
+        previously_undone = False
+        next_index = None
+        for op in self.data['operations']:
+            if op['state'] == 'rolled_back':
+                if state != 'rolling_back':
+                    raise CliError('transaction has rollback progress outside recovery')
+                previously_undone = True
+            else:
+                if previously_undone:
+                    raise CliError('transaction rollback progress is not a suffix of the log')
+                next_index = op['index']
+        return next_index if state == 'rolling_back' else None
+
+    def _chain_actions(self, ops: list[dict[str, Any]], boundary: int | None) -> dict[int, str]:
+        destination = self._checked_recovery_path(ops[0]['target'])
+        journal_dir = self.root / _JOURNAL_DIR
+        if destination == journal_dir or journal_dir in destination.parents:
+            raise CliError(f'transaction write chain targets recovery storage: {destination}')
+        actions: dict[int, str] = {}
+        pre_sizes: dict[str, int] = {}
+        for node, op in enumerate(ops):
+            before = op['pre_target']
+            if (type(op['index']) is not int or op['source'] is not None or op['pre_source'] is not None
+                    or before is None or op['post_sha256'] is None
+                    or self._checked_recovery_path(op['target']) != destination):
+                raise CliError(f'invalid transaction write chain operation: {op["index"]}')
+            if before['exists']:
+                sha, size = before['sha256'], before['size']
+                if type(size) is not int or pre_sizes.setdefault(sha, size) != size:
+                    raise CliError(f'inconsistent transaction write chain pre-image: {op["index"]}')
+            self._checked_backup(op)
+            if node + 1 < len(ops):
+                successor_pre = ops[node + 1]['pre_target']
+                if not successor_pre or not (self._post_matches(op, successor_pre) or
+                        (op['state'] != 'applied' and successor_pre == before)):
+                    raise CliError(f'inconsistent adjacent transaction writes: {op["index"]} and {ops[node + 1]["index"]}')
+                actions[op['index']] = 'applied' if successor_pre != before else 'not_applied'
+            if op['state'] == 'rolled_back':
+                actions[op['index']] = 'not_applied'
+
+        current = self._recovery_descriptor(destination)
+        for node in range(len(ops) - 1, -1, -1):
+            op = ops[node]
+            if op['state'] == 'rolled_back':
+                continue
+            next_pre = ops[node + 1]['pre_target'] if node + 1 < len(ops) else None
+            action = self._write_action(op, current, next_pre, may_have_undone=op['index'] == boundary)
+            if action == 'conflict':
+                raise CliError(f'transaction write chain filesystem conflict: {destination}')
+            actions[op['index']] = action
+            break
+        else:
+            if current != ops[0]['pre_target']:
+                raise CliError(f'rolled back transaction write chain changed: {destination}')
+        return actions
+
+    def _analysis(self, chains: dict[Path, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+        operations = self.data['operations']
+        states: dict[int, str] = {}
+        if chains:
+            invalid_paths: set[Path] = set()
+            try:
+                boundary = self._rollback_boundary()
+                self._checked_recovery_path((_JOURNAL_DIR / f'{self.transaction_id}.json').as_posix())
+                self._checked_recovery_path((_JOURNAL_DIR / self.transaction_id).as_posix(), directory=True)
+            except CliError:
+                return [{'index': op['index'], 'kind': op['kind'], 'state': 'conflict'} for op in operations]
+
+            for op in operations:
+                for field in ('source', 'target'):
+                    value = op[field]
+                    if value is None:
+                        continue
+                    key = self._path_key(value)
+                    if field == 'target' and op['kind'] == 'write' and key in chains:
+                        continue
+                    if key in chains:
+                        invalid_paths.add(key)
+                        states[op['index']] = 'conflict'
+
+            for key, ops in chains.items():
+                try:
+                    if key in invalid_paths or any(op['index'] in states for op in ops):
+                        raise CliError(f'transaction write chain has a mixed operation: {key}')
+                    states.update(self._chain_actions(ops, boundary))
+                except CliError:
+                    states.update((op['index'], 'conflict') for op in ops)
+
+        for op in operations:
+            index = op['index']
+            if index in states:
+                continue
+            states[index] = self._independent_recovery_action(op) if chains else self.classify(op)
+        return [{'index': op['index'], 'kind': op['kind'], 'state': states[op['index']]} for op in operations]
+
+    def _independent_recovery_action(self, op: dict[str, Any]) -> str:
+        try:
+            for field in ('source', 'target'):
+                if op[field] is not None:
+                    self._checked_recovery_path(op[field])
+            if op['state'] == 'rolled_back':
+                return 'not_applied'
+            state = self.classify(op)
+            if state == 'applied' and op['kind'] in {'write', 'unlink'}:
+                if op['pre_target'] is None:
+                    return 'conflict'
+                self._checked_backup(op)
+            return state
+        except (CliError, OSError, RuntimeError, ValueError):
+            return 'conflict'
+
+    def analysis(self) -> list[dict[str, Any]]:
+        return self._analysis(self._write_chains())
+
+    def _rollback_operation(self, op: dict[str, Any], action: str, *, checked: bool) -> None:
+        kind = op['kind']
+        path_for = self._checked_recovery_path if checked else self._path
+        src = path_for(op['source']) if op['source'] else None
+        dst = path_for(op['target']) if op['target'] else None
+        if kind == 'write' and not op['pre_target']['exists']:
+            if checked or dst.exists():
+                durable_unlink(dst)
+        elif kind in {'write', 'unlink'}:
+            backup = self._checked_backup(op) if checked else self._path(op['backup'])
+            if not backup or not backup.is_file():
+                raise CliError('transaction rollback payload is missing')
+            durable_copy_file(backup, dst)
+        elif kind == 'move' and action != 'duplicated':
+            durable_move_file(dst, src)
+        elif kind == 'move' or checked or dst.exists():
+            durable_unlink(dst)
+
+    def rollback(self, *, expected_analysis: list[dict[str, Any]] | None = None) -> None:
+        chains = self._write_chains()
+        current_analysis = self._analysis(chains)
+        if expected_analysis is not None and current_analysis != expected_analysis:
+            raise StalePlanError('transaction filesystem state changed since recovery review; regenerate the recovery plan')
+        actions = {entry['index']: entry['state'] for entry in current_analysis}
+        if 'conflict' in actions.values():
+            raise CliError('transaction recovery conflict; automatic rollback refused')
+        next_pre_by_index = {
+            op['index']: ops[node + 1]['pre_target'] if node + 1 < len(ops) else None
+            for ops in chains.values() for node, op in enumerate(ops)
+        }
+
+        self.data['state'] = 'rolling_back'
+        self._flush()
+        for op in reversed(self.data['operations']):
+            if chains and op['state'] == 'rolled_back':
+                continue
+            index = op['index']
+            action = actions[index]
+            if index in next_pre_by_index:
+                target = self._checked_recovery_path(op['target'])
+                current = self._recovery_descriptor(target)
+                observed = self._write_action(op, current, next_pre_by_index[index], may_have_undone=True)
+                if observed != action:
+                    raise CliError(f'transaction recovery state changed at operation {index}: {target}; run recovery-review again')
+            elif chains and self._independent_recovery_action(op) != action:
+                raise CliError(f'transaction recovery state changed at operation {index}; run recovery-review again')
+            if action in {'applied', 'duplicated'}:
+                self._rollback_operation(op, action, checked=bool(chains))
+            elif not chains:
+                continue
+            op['state'] = 'rolled_back'
+            self._flush()
+
+        for ops in chains.values():
+            first = ops[0]
+            target = self._checked_recovery_path(first['target'])
+            if self._recovery_descriptor(target) != first['pre_target']:
+                raise CliError(f'rolled back transaction write chain changed: {target}; run recovery-review again')
+        self.data['state'] = 'rolled_back'
+        self.data['rolled_back_at'] = now_iso()
+        self._flush()
+        self._cleanup_payload()
 
 def transaction_move(source:Path,target:Path)->None:
     tx=current_transaction();index=tx.prepare_move(source,target) if tx else None;durable_move_file(source,target)

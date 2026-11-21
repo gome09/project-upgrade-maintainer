@@ -1,7 +1,9 @@
 from __future__ import annotations
 import contextlib, io, json, tempfile, unittest
 from pathlib import Path
+from unittest import mock
 from cli.main import run
+from core import locking
 from core.errors import CliError
 from core.transactions import Transaction, unresolved_transactions
 from core.workspace import atomic_write
@@ -55,6 +57,43 @@ class Round14GovernanceDeliveryCase(unittest.TestCase):
     def test_transaction_recovery_refuses_third_party_conflict(self):
         self.init();target=self.root/'governed.txt';target.write_text('before\n');tx=Transaction.start(self.root,'fault-injection');atomic_write(target,'after\n');tx.fail('crash');target.write_text('third-party\n')
         review=self.cli('recovery-review','--transaction-id',tx.transaction_id,'--plan-out','recovery.json');self.assertFalse(review['result']['recoverable']);rejected=self.apply(review,'recovery.json','recovery-apply',expected=2);self.assertTrue(any('conflict' in x for x in rejected['errors']));self.assertEqual('third-party\n',target.read_text())
+
+    def test_active_recovery_requires_proven_exit_at_review_and_apply(self):
+        self.init()
+        target = self.root / 'governed.txt'
+        target.write_text('before\n', encoding='utf-8')
+        tx = Transaction.start(self.root, 'fault-injection')
+        try:
+            atomic_write(target, 'after\n')
+        finally:
+            tx.close()  # Leave a journal in the state a crashed owner would leave.
+        original_journal = tx.journal_path.read_bytes()
+        review_args = ('recovery-review', '--transaction-id', tx.transaction_id, '--plan-out', 'recovery.json')
+        cases = (
+            ('live', {'return_value': True}, 'exit could not be confirmed'),
+            ('unknown', {'return_value': None}, 'exit could not be confirmed'),
+            ('denied', {'side_effect': PermissionError('denied')}, 'probe failed'),
+            ('failure', {'side_effect': OSError('read failure')}, 'probe failed'),
+        )
+        with mock.patch.object(locking, '_pid_alive', return_value=False) as probe:
+            review = self.cli(*review_args)
+            probe.assert_called_once_with(tx.data['pid'])
+        self.assertTrue(review['result']['recoverable'])
+        for name, behavior, diagnostic in cases:
+            with self.subTest(probe=name), mock.patch.object(locking, '_pid_alive', **behavior) as probe:
+                blocked_review = self.cli('recovery-review', '--transaction-id', tx.transaction_id, expected=2)
+                blocked_apply = self.apply(review, 'recovery.json', 'recovery-apply', expected=2)
+                self.assertEqual([mock.call(tx.data['pid']), mock.call(tx.data['pid'])], probe.call_args_list)
+                for blocked in (blocked_review, blocked_apply):
+                    self.assertEqual([], blocked['changed'])
+                    self.assertIn(diagnostic, blocked['errors'][0])
+                self.assertEqual('after\n', target.read_text(encoding='utf-8'))
+                self.assertEqual(original_journal, tx.journal_path.read_bytes())
+        with mock.patch.object(locking, '_pid_alive', return_value=False) as probe:
+            self.apply(review, 'recovery.json', 'recovery-apply')
+            probe.assert_called_once_with(tx.data['pid'])
+        self.assertEqual('before\n', target.read_text(encoding='utf-8'))
+        self.assertEqual([], unresolved_transactions(self.root))
 
     def test_delivery_without_validation_is_blocked_even_with_exact_plan(self):
         self.init();review=self.cli('delivery-review','--gate','readiness','--target','v1','--require-check','release-suite','--subject-path','subject.txt','--plan-out','delivery.json');self.assertFalse(review['result']['eligible']);self.assertIn('no validation evidence is recorded',review['result']['blockers']);rejected=self.apply(review,'delivery.json','delivery-apply',expected=2);self.assertTrue(any('remains blocked' in x for x in rejected['errors']))

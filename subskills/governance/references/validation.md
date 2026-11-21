@@ -18,6 +18,8 @@ Validation intended for a Delivery Gate should be bound to the exact validated s
 
 Outside a readable Git repository root, evidence without an explicit subject remains `unbound` and cannot satisfy a Delivery Gate. Record the environment and scope deliberately: Delivery matches check + subject digest + scope + environment exactly.
 
+Git subjects reject visible directory links. An explicit directory subject can bind one when the final physical directory is visited inside the selected tree and its subtree has no links, skipped control entries, or saved plans. Choose a physical root covering both the code and real dependencies, or bind the complete immutable artifact by digest and reference. See [Delivery Gate subject binding](../../delivery/references/delivery-gate.md). An unavailable subject blocks execution up front. If it becomes unavailable during the command, the CLI rejects the recording and writes no passed evidence.
+
 Validation JSONL is append-only integrity evidence. Each new record stores the digest of the previous raw record and its own canonical record digest. `health-check` and Delivery validate the chain before trusting it. Unversioned validation lines remain readable, but they have no subject binding and cannot satisfy subject-bound Delivery requirements.
 
 ## Local Execution Evidence

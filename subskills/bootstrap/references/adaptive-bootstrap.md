@@ -21,6 +21,8 @@ Read-only profiling signals may include filtered file count, package/workspace r
 
 `core` is always active. `phase`, `reporting`, and `review` depend on `planning`. `.upgrade/AUTHORITY.json`, `.upgrade/AUTHORITY.md`, and `.upgrade/ARTIFACTS.json` all belong to `core`. The artifact registry stores extension-artifact policy metadata; these core registries/views do not themselves materialize heavyweight optional modules.
 
+On first initialization, the selected profile, modules, selection source, and registry digests are published together in `.upgrade/CONFIG.json`. If initialization stops before the directory is published, repeat the explicit profile and module arguments to use the same choice. After publication, rerun `initialize` without profile arguments to keep the saved choice and complete missing resources and maintenance records. Repeat optional flags such as `--create-root-bridge` for bridge work still due. If recovery is required on a retry, complete the existing transaction through review and exact approval before rerunning initialization.
+
 ## Lazy Activation
 
 Inactive-module resources need not exist. An explicit operation may activate only what it needs: `phase-update` -> `phase`; `validation-record` -> `validation`; collection into reports/reviews/tmp/archive/etc. -> matching destination module; cleanup archive/delete -> `lifecycle`; an approved artifact policy may activate only the module required by that artifact.

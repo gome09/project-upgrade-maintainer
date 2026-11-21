@@ -1,7 +1,8 @@
 """Transaction recovery audit, review, and apply commands."""
 from __future__ import annotations
-import argparse,re
+import argparse,re,socket
 from pathlib import Path
+from core import locking
 from core.audit import Result
 from core.errors import CliError,StalePlanError
 from core.plans import validate_apply_plan,write_plan_output
@@ -17,14 +18,16 @@ def _id(value:str)->str:
 def _recoverable(tx:Transaction)->None:
     state=tx.data.get('state')
     if state not in {'active','failed','rolling_back'}:raise CliError(f'transaction is not recoverable: {state}')
-    # Refuse to recover an apparently live local transaction.
-    if state=='active':
-        import os,socket
-        if tx.data.get('hostname')==socket.gethostname() and isinstance(tx.data.get('pid'),int):
-            try:os.kill(tx.data['pid'],0)
-            except ProcessLookupError:pass
-            except PermissionError:raise CliError('transaction owner process is still alive; recovery refused')
-            else:raise CliError('transaction owner process is still alive; recovery refused')
+    if state == 'active' and tx.data.get('hostname') == socket.gethostname():
+        pid = tx.data.get('pid')
+        if type(pid) is not int or pid <= 0:
+            raise CliError('transaction owner PID is invalid or missing; recovery refused')
+        try:
+            owner_alive = locking._pid_alive(pid)
+        except Exception as exc:
+            raise CliError(f'transaction owner process probe failed; recovery refused: {exc}') from exc
+        if owner_alive is not False:
+            raise CliError('transaction owner process is still alive or its exit could not be confirmed; recovery refused')
 
 def recovery_audit(root:Path,args:argparse.Namespace,result:Result)->None:
     items=unresolved_transactions(root)
@@ -51,4 +54,4 @@ def recovery_apply(root:Path,args:argparse.Namespace,result:Result)->None:
     if analysis!=e.get('operation_analysis'):raise StalePlanError('transaction filesystem state changed since recovery review; regenerate the recovery plan')
     if any(x['state']=='conflict' for x in analysis):raise CliError('transaction recovery conflict; automatic rollback refused')
     if args.dry_run:result.result={'transaction_id':tx.transaction_id,'would_rollback':analysis};return
-    tx.rollback();result.change(f'.upgrade/transactions/{tx.transaction_id}.json','rolled_back');result.result={'transaction_id':tx.transaction_id,'state':'rolled_back'};finalize_mutation(root,result)
+    tx.rollback(expected_analysis=analysis);result.change(f'.upgrade/transactions/{tx.transaction_id}.json','rolled_back');result.result={'transaction_id':tx.transaction_id,'state':'rolled_back'};finalize_mutation(root,result)

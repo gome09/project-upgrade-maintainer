@@ -58,6 +58,15 @@ class LockingConcurrencyCase(unittest.TestCase):
                 self.assertEqual(alive, locking._windows_pid_alive(12345))
             self.assertEqual(3, kernel.CloseHandle.call_count)
 
+    def test_windows_owner_probe_never_uses_kill(self):
+        os_api = mock.Mock(name='windows_os')
+        os_api.name = 'nt'
+        with mock.patch.object(locking, 'os', os_api), \
+             mock.patch.object(locking, '_windows_pid_alive', return_value=True) as probe:
+            self.assertTrue(locking._pid_alive(12345))
+            probe.assert_called_once_with(12345)
+            os_api.kill.assert_not_called()
+
     def test_invalid_pid_is_not_proof_of_exit(self):
         for pid in (0, -1, True):
             self.assertTrue(locking._pid_alive(pid))

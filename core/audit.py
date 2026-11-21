@@ -117,7 +117,8 @@ def finalize_mutation(
         return
 
     if not had_changes and not manifest_changed:
-        return
+        if result.command != "initialize" or (verified_upgrade(root) / "traces" / "last-maintenance.md").exists():
+            return
 
     try:
         trace_paths = write_report(root, result, clock=clock, writer=writer)

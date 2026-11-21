@@ -277,9 +277,14 @@ def delivery_evidence_state(
         if controls.get("require_execution") and "execution" not in record:
             blockers.append(f"required validation {check!r} requires local execution evidence")
 
-    for (check, digest, record_scope, record_environment), record in sorted(validations.items(), key=lambda item: item[0]):
-        if digest != subject_digest or record_scope != requested_scope or record_environment != requested_environment or check in required:
-            continue
+    optional_validation = {
+        check: record
+        for (check, digest, record_scope, record_environment), record in validations.items()
+        if subject_digest is not None
+        and (digest, record_scope, record_environment) == (subject_digest, requested_scope, requested_environment)
+        and check not in required
+    }
+    for check, record in sorted(optional_validation.items()):
         if record["status"] != "passed":
             warnings.append(f"non-required validation {check!r} latest status is {record['status']}")
 
