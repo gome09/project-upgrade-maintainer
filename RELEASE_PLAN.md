@@ -2,16 +2,24 @@
 
 Repository: https://github.com/gome09/project-upgrade-maintainer.git
 Remote transport: SSH (`git@github.com:gome09/project-upgrade-maintainer.git`)
-Current release candidate: 18.0.2
+Latest published release: 18.0.2
 
-## 18.0.2 release candidate
+## 18.0.2 release record
+
+Published on 2026-11-21 as [v18.0.2](https://github.com/gome09/project-upgrade-maintainer/releases/tag/v18.0.2),
+tagged at `9861005a8a59d2c882516dff79f76962c8d01088`.
+All 11 jobs passed in [GitHub Actions](https://github.com/gome09/project-upgrade-maintainer/actions/runs/44884505660).
+The first Windows matrix run found test fixtures that created relative
+symbolic links with non-native separators. The corrected fixtures passed
+the Windows matrix with the same runtime source and archive.
 
 The runtime files from the independently reviewed `final_skill` are present in
 this repository with the new version metadata. The release archive contains
 88 runtime files and passes ZIP integrity, source comparison, reproducibility,
 and the unpacked CLI version check.
 
-Asset: `dist/project-upgrade-maintainer-18.0.2.skill`.
+Asset: `dist/project-upgrade-maintainer-18.0.2.skill` (172390 bytes).
+GitHub reported the same SHA-256 and marked the release as latest.
 
 SHA-256: `52e9e952e3f0ed858d637f61b7baf69441cef04cd2bb893d9fb5c0a999281900`.
 
